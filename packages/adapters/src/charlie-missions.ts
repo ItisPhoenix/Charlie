@@ -10,6 +10,7 @@ import type {
 } from "@rakazo/core";
 import { runAsSystem } from "@rakazo/db";
 import { messageBot } from "./bot-messages.js";
+import { verifiedDependencyContext } from "./charlie-mission-evidence.js";
 import type { RunContext } from "./run-context.js";
 
 type Progress = CharlieWorkProgress & {
@@ -196,6 +197,19 @@ function deliveryKey(id: string, workKey: string, attempt: number) {
 async function delegatedRun(ctx: RunContext, row: MissionRow, workKey: string) {
   const spec = row.plan.work.find((item) => item.key === workKey);
   if (!spec) return null;
+  const trackedRunId = row.progress.find((item) => item.key === workKey)?.delegatedRunId;
+  if (trackedRunId) {
+    return ctx.deps.prisma.run.findFirst({
+      where: {
+        id: trackedRunId,
+        botId: spec.assigneeBotId,
+        userId: row.userId,
+        spaceId: row.spaceId,
+        trigger: { in: ["charlie_mission", "bot_message"] },
+      },
+      select: { id: true, status: true, trigger: true },
+    });
+  }
   const bot = await ctx.deps.prisma.bot.findFirst({
     where: {
       id: spec.assigneeBotId,
@@ -273,8 +287,12 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
       "Verification criteria: " + spec.verificationCriteria,
       "Execute within your authority. Return concrete evidence, uncertainty and blockers.",
       "Do not claim that Charlie has verified completion.",
-    ].join("\n");
-    if (message.length > BOT_MESSAGE_MAX_LENGTH) {
+    ];
+    const dependency = verifiedDependencyContext(row.plan, row.progress, key);
+    if (!dependency.ok) return { error: dependency.error, dispatched };
+    if (dependency.context) message.push(dependency.context);
+    const fullMessage = message.join("\n");
+    if (fullMessage.length > BOT_MESSAGE_MAX_LENGTH) {
       return { error: "Delegation exceeds the bot-message size limit.", dispatched };
     }
     const attempt = (row.progress.find((item) => item.key === key)?.attempts ?? 0) + 1;
@@ -285,7 +303,7 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
       { id: ctx.bot.id, name: ctx.bot.name },
       {
         bot_id: spec.assigneeBotId,
-        message,
+        message: fullMessage,
         intent: "request",
         deliveryKey: deliveryKey(row.id, key, attempt),
       },
@@ -338,7 +356,8 @@ export async function missionSubmit(ctx: RunContext, args: Record<string, unknow
     return { error: "Work must have been delegated before submission." };
   }
   const run = await delegatedRun(ctx, row, key);
-  if (!run || run.status !== "completed" || run.trigger !== "bot_message") {
+  if (!run || run.status !== "completed" ||
+      !["bot_message", "charlie_mission"].includes(run.trigger)) {
     return { error: "A completed delegated bot run is required for submission." };
   }
   const next: Progress[] = [

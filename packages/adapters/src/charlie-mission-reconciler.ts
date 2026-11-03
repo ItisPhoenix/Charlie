@@ -4,6 +4,7 @@ import { decideCharlieMissionWork, validateCharlieMissionPlan } from "@rakazo/co
 import type { CharlieMissionPlan, CharlieWorkProgress } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { verifiedDependencyContext } from "./charlie-mission-evidence.js";
 
 type Progress = CharlieWorkProgress & {
   evidence?: string;
@@ -289,6 +290,18 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
         const spec = row.plan.work.find((work) => work.key === key)!;
         const prior = next.find((work) => work.key === key);
         const attempt = (prior?.attempts ?? 0) + 1;
+        const dependency = verifiedDependencyContext(row.plan, next, key);
+        if (!dependency.ok) {
+          const blocked: Progress = {
+            key, state: "blocked", attempts: prior?.attempts ?? 0,
+            evidence: dependency.error,
+          };
+          const oldIndex = next.findIndex((work) => work.key === key);
+          if (oldIndex >= 0) next[oldIndex] = blocked;
+          else next.push(blocked);
+          changed = true;
+          continue;
+        }
         const prompt = [
           "Charlie mission continued as background delegated work.",
           "Mission: " + row.id + ", task: " + key,
@@ -298,7 +311,8 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           "Use your ordinary tools and existing permission gates.",
           "You have NO owner-originated host-root grant. Request the owner if privileged work is needed.",
           "Produce concrete evidence and blockers in your final answer.",
-        ].join("\n");
+          dependency.context,
+        ].filter(Boolean).join("\n");
         const runId = await queueAgent(
           tx, row, spec, spec.assigneeBotId, TASK_TRIGGER,
           runNonce(row.id, key, attempt), prompt,
