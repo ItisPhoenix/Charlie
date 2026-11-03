@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -178,6 +180,7 @@ import { monitoringRoutes } from "./monitoring.js";
 import { pluginSubmissionRoutes } from "./plugin-submissions.js";
 import { sendReferralEmails, startReferralEmails } from "./referral-email.js";
 import { mountApiRequestBodyLimits } from "./request-body-limit.js";
+import { issueGordonCommandGrant } from "./owner-command.js";
 import { createRouter } from "./router.js";
 import { mountScreenTarget } from "./screen-proxy.js";
 import { createAuthResponseAudit } from "./security-audit.js";
@@ -923,6 +926,41 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     return actor && { actor, sessionId: session.session.id };
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
+
+  // Worker-only request for a command-bound owner grant.
+  // No command execution happens inside this API.
+  app.post("/api/internal/charlie/authorize", async (c) => {
+    c.header("cache-control", "no-store");
+
+    const file = process.env.CHARLIE_OWNER_WORKER_KEY_FILE;
+    if (!file) return c.json({ error: "disabled" }, 503);
+
+    const candidate = c.req.header("x-charlie-worker-key") ?? "";
+    if (!candidate || candidate.length > 256)
+      return c.json({ error: "unauthorized" }, 403);
+
+    const key = readFileSync(file, "utf8").trim();
+    const digest = (value: string) =>
+      createHash("sha256").update(value, "utf8").digest();
+
+    if (!timingSafeEqual(digest(candidate), digest(key)))
+      return c.json({ error: "unauthorized" }, 403);
+
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      return c.json({ error: "invalid_request" }, 400);
+
+    try {
+      const grant = await runAsSystem("charlie owner command issuer", () =>
+        issueGordonCommandGrant(prisma, body as Record<string, unknown>),
+      );
+      if (!grant) return c.json({ error: "not_authorized" }, 403);
+      return c.json(grant);
+    } catch {
+      return c.json({ error: "not_authorized" }, 403);
+    }
+  });
+
   if (userDeviceHub && userDevices) {
     mountUserDeviceRoutes(app, {
       prisma,
