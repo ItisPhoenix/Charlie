@@ -31,3 +31,14 @@ independent signed origin, command binding and effect replay checks.
 
 ## Release rule
 Never deploy an incomplete Phase 1 batch to production.
+
+## Batch 2 — Persisted missions and real delegation (integration branch only)
+- Owner-attested Chief runs may create durable, versioned mission graphs.
+- Ready tasks route through the existing message_bot persistence, wake and replay safeguards.
+- Mission status reads the actual child run associated with the deduplicated message.
+- Completed agent runs may be submitted with evidence, never silently verified.
+- Independent verification, dependency release, unattended reconciliation, and
+  end-to-end live mission acceptance remain pending for the final Phase 1 batch.
+- The new mission table currently stores goal and evidence JSON in plaintext in
+  PostgreSQL. Encrypt before considering it production-ready for sensitive goals.
+- No mission tool grants Gordon authority: his signed owner-to-Gordon flow remains separate.

@@ -1065,6 +1065,72 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "mission_create",
+    description: "Charlie executive: persist one bounded owner mission with an acyclic dependency graph and named agent assignees. Does not dispatch work.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", minLength: 1, maxLength: 8000 },
+        maxConcurrentAgents: { type: "integer", minimum: 1, maximum: 8 },
+        maxRuntimeSeconds: { type: "integer", minimum: 60, maximum: 86400 },
+        work: {
+          type: "array", minItems: 1, maxItems: 40,
+          items: {
+            type: "object",
+            properties: {
+              key: { type: "string", description: "Unique lowercase key (3-64 characters)." },
+              title: { type: "string", maxLength: 200 },
+              assigneeBotId: { type: "string" },
+              dependsOn: { type: "array", items: { type: "string" } },
+              verificationCriteria: { type: "string", maxLength: 2000 },
+              maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
+            },
+            required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","maxAttempts"],
+          },
+        },
+      },
+      required: ["goal", "maxConcurrentAgents", "maxRuntimeSeconds", "work"],
+    },
+  },
+  {
+    name: "mission_list",
+    description: "List the owner's most recent Charlie missions and their durable progress.",
+    inputSchema: { type: "object", properties: {} },
+    readOnly: true,
+  },
+  {
+    name: "mission_status",
+    description: "Inspect one Charlie mission, dependencies, and real delegated bot run statuses. A completed run is not verified work.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+    readOnly: true,
+  },
+  {
+    name: "mission_dispatch",
+    description: "Charlie executive: send dependency-ready work to assigned bots with durable deduplicated messages. Only a fresh authenticated owner-to-Charlie request is allowed.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+  },
+  {
+    name: "mission_submit",
+    description: "Record evidence from a completed delegated bot run as submitted, NOT independently verified. Dependent work remains locked.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+        evidence: { type: "string", minLength: 1, maxLength: 4000 },
+      },
+      required: ["missionId", "workKey", "evidence"],
+    },
+  },
+  {
     name: "task_catalog",
     description:
       "Read-only inventory and source of truth for this bot's real open tasks, saved routines, taught skills, reusable skills, and currently exposed tools. Call it before claiming a task or skill exists. Use the returned ids and exact names; do not infer capabilities from memory or conversation text.",

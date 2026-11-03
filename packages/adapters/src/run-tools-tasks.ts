@@ -1,3 +1,4 @@
+import { missionCreate, missionDispatch, missionList, missionStatus, missionSubmit } from "./charlie-missions.js";
 import {
   desktopProtectionGuardMessage,
   protectedComputerLifecycleRefusal,
@@ -36,6 +37,21 @@ import {
 
 /** The task catalog, scratchpad, ticket board, schedules and skills. */
 export const taskTools: ToolHandlers = {
+  async mission_create(ctx, call) {
+    return call.finish(await missionCreate(ctx, call.args, call.effectKey));
+  },
+  async mission_list(ctx) {
+    return missionList(ctx);
+  },
+  async mission_status(ctx, call) {
+    return missionStatus(ctx, call.args);
+  },
+  async mission_dispatch(ctx, call) {
+    return call.finish(await missionDispatch(ctx, call.args));
+  },
+  async mission_submit(ctx, call) {
+    return call.finish(await missionSubmit(ctx, call.args));
+  },
   async task_catalog(ctx) {
     const { deps, run, bot, thread } = ctx;
     return taskCatalogFromTool(deps, {
