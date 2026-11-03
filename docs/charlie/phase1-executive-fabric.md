@@ -56,3 +56,14 @@ Never deploy an incomplete Phase 1 batch to production.
   it is **not** yet a daemon/background autonomous recovery loop.
 - No new migrations in this batch. Migration from Batch 2 still requires
   real PostgreSQL migration acceptance in an isolated clone.
+
+## Batch 4 — Review provenance and replay correctness
+- Separate reviewer bot must be active and distinct from executor and coordinator.
+- Submitted work is claimed as verifying before reviewer dispatch; a retried send
+  preserves the originally chosen reviewer and uses a per-attempt delivery key.
+- A real completed reviewer run with a structured evidence assessment is required
+  before recording reviewed success or a blocker.
+- Reviewer approval is an evidence assessment, not guaranteed factual correctness.
+- Canonical JSON plan comparisons no longer fail when PostgreSQL JSONB reorders keys.
+- Mission status and reviews remain owner-command-driven; automatic background
+  recovery, encrypted storage and live multi-agent acceptance are still pending.

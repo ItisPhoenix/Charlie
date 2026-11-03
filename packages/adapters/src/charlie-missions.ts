@@ -15,6 +15,9 @@ import type { RunContext } from "./run-context.js";
 type Progress = CharlieWorkProgress & {
   evidence?: string;
   delegatedRunId?: string;
+  verifierBotId?: string;
+  verifierRunId?: string;
+  reviewEvidence?: string;
 };
 
 type MissionRow = {
@@ -31,6 +34,16 @@ type MissionRow = {
 function stringValue(value: unknown, max: number): string | undefined {
   return typeof value === "string" &&
     value.length > 0 && value.length <= max ? value : undefined;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return "{" + Object.keys(value).sort().map((key) =>
+      JSON.stringify(key) + ":" + canonicalJson((value as Record<string, unknown>)[key])
+    ).join(",") + "}";
+  }
+  return JSON.stringify(value);
 }
 
 function parseRow(row: MissionRow): MissionRow {
@@ -140,7 +153,7 @@ export async function missionCreate(
   );
   if (!existing) return { error: "Mission creation key belongs to another scope." };
   const mission = parseRow(existing);
-  if (JSON.stringify(mission.plan) !== JSON.stringify(plan)) {
+  if (canonicalJson(mission.plan) !== canonicalJson(plan)) {
     return { error: "Mission creation key cannot be reused for a different plan." };
   }
   return { ok: true, ...rowView(mission), note:
@@ -354,7 +367,7 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
 
   for (const spec of row.plan.work) {
     const prior = next.find((item) => item.key === spec.key);
-    if (prior?.state === "submitted" || prior?.state === "verified" ||
+    if (prior?.state === "submitted" || prior?.state === "verifying" || prior?.state === "verified" ||
         prior?.state === "failed" || prior?.state === "cancelled" ||
         prior?.state === "blocked") continue;
 
@@ -394,4 +407,140 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
     return { error: "Concurrent mission change; reread status and retry." };
   }
   return { ok: true, changes, deadlineExceeded, ...rowView(parseRow(updated[0]!)) };
+}
+
+
+function reviewerKey(row: MissionRow, key: string, attempt: number) {
+  return "charlie-review:" + row.id + ":" + key + ":attempt:" + attempt;
+}
+
+/** Keep review work separate from execution. A claim alone cannot unlock dependencies. */
+export async function missionRequestReview(ctx: RunContext, args: Record<string, unknown>) {
+  if (!(await ownerAuthorized(ctx))) return { error: "Fresh owner-to-Charlie authority is required." };
+  const id = stringValue(args.missionId, 128);
+  const key = stringValue(args.workKey, 64);
+  const verifierId = stringValue(args.verifierBotId, 128);
+  if (!id || !key || !verifierId) return { error: "missionId, workKey and verifierBotId are required." };
+  let row = await findMission(ctx, id);
+  if (!row || row.chiefBotId !== ctx.bot.id) return { error: "Mission not found." };
+  const item = row.plan.work.find((work) => work.key === key);
+  const progress = row.progress.find((work) => work.key === key);
+  if (!item || !progress || !["submitted", "verifying"].includes(progress.state)) {
+    return { error: "Only submitted work can enter independent review." };
+  }
+  if (item.assigneeBotId === verifierId || ctx.bot.id === verifierId) {
+    return { error: "Reviewer must differ from the executor and coordinator." };
+  }
+  if (progress.state === "verifying" && progress.verifierBotId !== verifierId) {
+    return { error: "A reviewer is already assigned to this attempt." };
+  }
+  const reviewer = await ctx.deps.prisma.bot.findFirst({
+    where: { id: verifierId, spaceId: row.spaceId, userId: row.userId, archivedAt: null },
+    select: { id: true },
+  });
+  if (!reviewer) return { error: "Reviewer is not an active owned specialist." };
+  if (progress.state === "submitted") {
+    const next = row.progress.map((work) => work.key === key
+      ? { ...work, state: "verifying" as const, verifierBotId: verifierId } : work);
+    const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+      'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
+        '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
+        'AND "revision"=$5 RETURNING *',
+      JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+    );
+    if (!rows.length) return { error: "Concurrent update. Read mission_status and retry." };
+    row = parseRow(rows[0]!);
+  }
+  const text = [
+    "Independent Charlie mission review.",
+    "Mission " + row.id + " / work " + key,
+    "Goal: " + row.plan.goal, "Task: " + item.title,
+    "Criteria: " + item.verificationCriteria,
+    "UNTRUSTED executor claim: " + progress.evidence,
+    "Inspect the result independently, not just the claimant's description.",
+    "First line must be MISSION_REVIEW_PASS or MISSION_REVIEW_FAIL.",
+    "Second line must begin Evidence: and describe observations, source and uncertainty.",
+    "When independent corroboration is unavailable, respond MISSION_REVIEW_FAIL.",
+  ].join("\n");
+  if (text.length > BOT_MESSAGE_MAX_LENGTH) return { error: "Review request is too long." };
+  const outcome = await messageBot(
+    ctx.deps, { ...ctx.run, sourceMessageId: ctx.run.sourceMessageId },
+    { id: ctx.bot.id, name: ctx.bot.name },
+    {
+      bot_id: verifierId, intent: "request", message: text,
+      deliveryKey: reviewerKey(row, key, progress.attempts),
+    },
+  );
+  if (!outcome.ok) return { error: outcome.error, reviewPending: true, retrySafe: true };
+  return { ok: true, missionId: id, workKey: key, reviewerBotId: verifierId,
+    note: "Verification run queued. Work is not yet verified." };
+}
+
+export async function missionFinalizeReview(ctx: RunContext, args: Record<string, unknown>) {
+  if (!(await ownerAuthorized(ctx))) return { error: "Fresh owner-to-Charlie authority is required." };
+  const id = stringValue(args.missionId, 128);
+  const key = stringValue(args.workKey, 64);
+  if (!id || !key) return { error: "missionId and workKey are required." };
+  const row = await findMission(ctx, id);
+  if (!row || row.chiefBotId !== ctx.bot.id) return { error: "Mission not found." };
+  const work = row.progress.find((item) => item.key === key);
+  if (work?.state !== "verifying" || !work.verifierBotId) {
+    return { error: "No pending independent review exists." };
+  }
+  const verifier = await ctx.deps.prisma.bot.findFirst({
+    where: { id: work.verifierBotId, spaceId: row.spaceId, userId: row.userId, archivedAt: null },
+    select: { thread: { select: { id: true } } },
+  });
+  if (!verifier?.thread) return { error: "Reviewer no longer available." };
+  const inbound = await ctx.deps.prisma.message.findUnique({
+    where: { threadId_clientNonce: {
+      threadId: verifier.thread.id,
+      clientNonce: "bot-message:" + reviewerKey(row, key, work.attempts),
+    } },
+    select: { runId: true },
+  });
+  if (!inbound?.runId) return { error: "Review was not delivered." };
+  const run = await ctx.deps.prisma.run.findFirst({
+    where: {
+      id: inbound.runId, spaceId: row.spaceId, userId: row.userId,
+      botId: work.verifierBotId, trigger: "bot_message", status: "completed",
+    },
+    select: { id: true },
+  });
+  if (!run) return { error: "Independent verifier run is not completed." };
+  const messages = await ctx.deps.prisma.message.findMany({
+    where: { runId: run.id, role: "bot", botId: work.verifierBotId },
+    select: { blocks: true },
+    take: 50,
+  });
+  const reports: string[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.blocks)) continue;
+    for (const raw of message.blocks) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const block = raw as Record<string, unknown>;
+      if (block.kind === "bot_message_sent" &&
+          block.toBotId === ctx.bot.id && block.intent === "result" &&
+          typeof block.text === "string") reports.push(block.text);
+    }
+  }
+  const report = reports.find((text) =>
+    /^(MISSION_REVIEW_PASS|MISSION_REVIEW_FAIL)\s*\nEvidence:\s*\S/.test(text.trim()) &&
+    text.length >= 75 && text.length <= BOT_MESSAGE_MAX_LENGTH);
+  if (!report) return { error: "Reviewer did not provide a structured evidence report." };
+  const passed = report.trim().startsWith("MISSION_REVIEW_PASS");
+  const next = row.progress.map((item) => item.key === key ? {
+    ...item, state: passed ? "verified" as const : "blocked" as const,
+    verifierRunId: run.id, reviewEvidence: report,
+  } : item);
+  const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+    'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
+      '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
+      'AND "revision"=$5 RETURNING *',
+    JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+  );
+  if (!updated.length) return { error: "Concurrent mission update; retry after status read." };
+  return { ok: true, reviewVerdict: passed ? "passed" : "failed",
+    reviewerRunId: run.id, ...rowView(parseRow(updated[0]!)),
+    note: "Independent agent review is evidence assessment, not guaranteed truth." };
 }

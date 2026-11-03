@@ -1118,6 +1118,20 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "mission_request_review",
+    description: "Send submitted mission work to a different owned specialist for independent review; do not unlock dependents.",
+    inputSchema: { type: "object", properties: {
+      missionId: { type: "string" }, workKey: { type: "string" }, verifierBotId: { type: "string" },
+    }, required: ["missionId", "workKey", "verifierBotId"] },
+  },
+  {
+    name: "mission_finalize_review",
+    description: "Record an evidence verdict only after a different reviewer bot's real completed run and structured report.",
+    inputSchema: { type: "object", properties: {
+      missionId: { type: "string" }, workKey: { type: "string" },
+    }, required: ["missionId", "workKey"] },
+  },
+  {
     name: "mission_reconcile",
     description: "Reconcile persisted mission state from real delegated run status. Requeues failed work only when the attempt and deadline budgets permit, without claiming verification.",
     inputSchema: {

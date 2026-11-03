@@ -71,6 +71,8 @@ export const BUILTIN_TOOL_NAMES = [
   "mission_dispatch",
   "mission_submit",
   "mission_reconcile",
+  "mission_request_review",
+  "mission_finalize_review",
   "task_catalog",
   "scratchpad_list",
   "scratchpad_add",

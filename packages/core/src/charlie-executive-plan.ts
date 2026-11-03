@@ -8,6 +8,7 @@ export type CharlieWorkState =
   | "queued"
   | "running"
   | "submitted"
+  | "verifying"
   | "verified"
   | "blocked"
   | "failed"
@@ -130,7 +131,7 @@ export function validateCharlieMissionPlan(
 }
 
 const WORK_STATES = new Set<CharlieWorkState>([
-  "planned", "queued", "running", "submitted",
+  "planned", "queued", "running", "submitted", "verifying",
   "verified", "blocked", "failed", "cancelled",
 ]);
 
@@ -161,7 +162,7 @@ export function decideCharlieMissionWork(
     states.get(key)?.state ?? "planned";
 
   const active = plan.work.filter((item) =>
-    ["queued", "running"].includes(stateOf(item.key)),
+    ["queued", "running", "verifying"].includes(stateOf(item.key)),
   ).length;
 
   const verified = plan.work.filter((item) =>
@@ -178,7 +179,7 @@ export function decideCharlieMissionWork(
   );
 
   const submitted = plan.work.some((item) =>
-    stateOf(item.key) === "submitted",
+    ["submitted", "verifying"].includes(stateOf(item.key)),
   );
 
   // Never oversubscribe a previously persisted running mission.
