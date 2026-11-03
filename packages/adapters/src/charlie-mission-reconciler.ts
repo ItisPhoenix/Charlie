@@ -117,19 +117,29 @@ async function finalOutput(tx: Tx, runId: string, botId: string, coordinatorId: 
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 40,
   });
+  // Prefer the agent's explicit result to its coordinator. Ordinary chat text
+  // can contain intermediate progress which is not a final evidence report.
   for (const message of messages) {
     if (!Array.isArray(message.blocks)) continue;
     for (const block of message.blocks) {
       if (!block || typeof block !== "object" || Array.isArray(block)) continue;
       const item = block as Record<string, unknown>;
-      if (item.kind === "text" && typeof item.text === "string" && item.text.trim()) {
-        return item.text.trim().slice(0, OUTCOME_LIMIT);
-      }
       if (item.kind === "bot_message_sent" && item.toBotId === coordinatorId &&
           item.intent === "result" && typeof item.text === "string" && item.text.trim()) {
         return item.text.trim().slice(0, OUTCOME_LIMIT);
       }
     }
+  }
+  for (const message of messages) {
+    if (!Array.isArray(message.blocks)) continue;
+    const text = message.blocks.flatMap((block) => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return [];
+      const item = block as Record<string, unknown>;
+      return item.kind === "text" && typeof item.text === "string" && item.text.trim()
+        ? [item.text.trim()]
+        : [];
+    }).join("\n");
+    if (text) return text.slice(0, OUTCOME_LIMIT);
   }
   return "";
 }
