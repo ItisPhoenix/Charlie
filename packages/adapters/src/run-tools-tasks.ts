@@ -1,4 +1,4 @@
-import { missionCreate, missionDispatch, missionList, missionStatus, missionSubmit } from "./charlie-missions.js";
+import { missionCreate, missionDispatch, missionList, missionReconcile, missionStatus, missionSubmit } from "./charlie-missions.js";
 import {
   desktopProtectionGuardMessage,
   protectedComputerLifecycleRefusal,
@@ -51,6 +51,9 @@ export const taskTools: ToolHandlers = {
   },
   async mission_submit(ctx, call) {
     return call.finish(await missionSubmit(ctx, call.args));
+  },
+  async mission_reconcile(ctx, call) {
+    return call.finish(await missionReconcile(ctx, call.args));
   },
   async task_catalog(ctx) {
     const { deps, run, bot, thread } = ctx;

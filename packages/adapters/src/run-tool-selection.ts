@@ -21,6 +21,8 @@ export const READ_ONLY_AGENT_TOOLS = new Set([
   "request_takeover",
   "run_subagent",
   "task_catalog",
+  "mission_list",
+  "mission_status",
   "recall_memory",
   "schedule_list",
   "scratchpad_list",
@@ -107,6 +109,7 @@ export function selectBuiltinToolsForRun(options: {
       (!FLEET_TOOL_NAMES_SET.has(tool.name) ||
         (Boolean(options.fleetManagement) && ownerStartedRun)) &&
       (ownerStartedRun || (tool.name !== "update_preferences" && tool.name !== "feedback")) &&
+      (ownerStartedRun || !["mission_create", "mission_dispatch", "mission_submit", "mission_reconcile"].includes(tool.name)) &&
       (options.paymentWalletEnabled || !PURCHASE_TOOL_NAMES.has(tool.name)) &&
       (options.mediaImagesEnabled || tool.name !== "generate_image") &&
       (options.mediaVideoEnabled || tool.name !== "generate_video") &&

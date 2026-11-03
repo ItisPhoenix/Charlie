@@ -42,3 +42,17 @@ Never deploy an incomplete Phase 1 batch to production.
 - The new mission table currently stores goal and evidence JSON in plaintext in
   PostgreSQL. Encrypt before considering it production-ready for sensitive goals.
 - No mission tool grants Gordon authority: his signed owner-to-Gordon flow remains separate.
+
+## Batch 3 — Recovery and hardening
+- Fixed creation-key collision handling: no cross-owner upsert or conflict leak.
+- Delegations carry stable per-attempt delivery keys, allowing bounded retry
+  without duplicating messages after a crash.
+- Added explicit mission_reconcile against actual delegated runs: running,
+  queued, cancelled and failed; budgets prevent indefinite retry.
+- Dispatch validates real bot-message size limits.
+- No automatic verification: a successful model run is not independently
+  verified. Verified completion and autonomous evidence review remain blocked.
+- Reconciliation currently requires a fresh authenticated owner-to-Chief turn;
+  it is **not** yet a daemon/background autonomous recovery loop.
+- No new migrations in this batch. Migration from Batch 2 still requires
+  real PostgreSQL migration acceptance in an isolated clone.

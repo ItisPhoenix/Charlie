@@ -1118,6 +1118,15 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "mission_reconcile",
+    description: "Reconcile persisted mission state from real delegated run status. Requeues failed work only when the attempt and deadline budgets permit, without claiming verification.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+  },
+  {
     name: "mission_submit",
     description: "Record evidence from a completed delegated bot run as submitted, NOT independently verified. Dependent work remains locked.",
     inputSchema: {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BOT_MESSAGE_MAX_LENGTH,
   decideCharlieMissionWork,
   validateCharlieMissionPlan,
 } from "@rakazo/core";
@@ -107,6 +108,10 @@ export async function missionCreate(
     return { error: error instanceof Error ? error.message : "Invalid mission plan" };
   }
 
+  if (!stringValue(creationKey, 256)) return { error: "Invalid mission creation key." };
+  if (plan.work.some((item) => item.assigneeBotId === ctx.bot.id)) {
+    return { error: "Chief must coordinate work, not delegate to itself." };
+  }
   const owners = [...new Set(plan.work.map((item) => item.assigneeBotId))];
   const bots = await ctx.deps.prisma.bot.findMany({
     where: {
@@ -120,14 +125,25 @@ export async function missionCreate(
   if (bots.length !== owners.length) {
     return { error: "Every work assignee must be an active bot owned by this user." };
   }
+  // Never update or return a different tenant's row on a creation-key conflict.
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'INSERT INTO "charlie_missions" ("id","spaceId","userId","chiefBotId","creationKey","plan") ' +
       'VALUES ($1,$2,$3,$4,$5,$6::jsonb) ' +
-      'ON CONFLICT ("creationKey") DO UPDATE SET "creationKey"=EXCLUDED."creationKey" RETURNING *',
+      'ON CONFLICT ("creationKey") DO NOTHING RETURNING *',
     randomUUID(), ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
     creationKey, JSON.stringify(plan),
   );
-  return { ok: true, ...rowView(parseRow(rows[0]!)), note:
+  const [existing] = rows.length ? rows : await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+    'SELECT * FROM "charlie_missions" WHERE "creationKey"=$1 ' +
+      'AND "spaceId"=$2 AND "userId"=$3 AND "chiefBotId"=$4 LIMIT 1',
+    creationKey, ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
+  );
+  if (!existing) return { error: "Mission creation key belongs to another scope." };
+  const mission = parseRow(existing);
+  if (JSON.stringify(mission.plan) !== JSON.stringify(plan)) {
+    return { error: "Mission creation key cannot be reused for a different plan." };
+  }
+  return { ok: true, ...rowView(mission), note:
     "Mission persisted; dispatch ready tasks with mission_dispatch." };
 }
 
@@ -148,8 +164,8 @@ export async function missionList(ctx: RunContext) {
   }) };
 }
 
-function deliveryKey(id: string, workKey: string) {
-  return "charlie-mission:" + id + ":" + workKey;
+function deliveryKey(id: string, workKey: string, attempt: number) {
+  return "charlie-mission:" + id + ":" + workKey + ":attempt:" + attempt;
 }
 
 async function delegatedRun(ctx: RunContext, row: MissionRow, workKey: string) {
@@ -169,7 +185,9 @@ async function delegatedRun(ctx: RunContext, row: MissionRow, workKey: string) {
     where: {
       threadId_clientNonce: {
         threadId: bot.thread.id,
-        clientNonce: "bot-message:" + deliveryKey(row.id, spec.key),
+        clientNonce: "bot-message:" + deliveryKey(
+          row.id, spec.key, row.progress.find((p) => p.key === workKey)?.attempts ?? 1,
+        ),
       },
     },
     select: { runId: true },
@@ -223,13 +241,18 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
   const initial = decideCharlieMissionWork(row.plan, row.progress);
   for (const key of initial.ready) {
     const spec = row.plan.work.find((item) => item.key === key)!;
-    const message =
-      "Charlie mission " + row.id + ", work " + spec.key + ".\n" +
-      "Goal: " + row.plan.goal + "\n" +
-      "Task: " + spec.title + "\n" +
-      "Verification criteria: " + spec.verificationCriteria + "\n" +
-      "Execute within your authority. Return concrete evidence, uncertainty and blockers. " +
-      "Do not claim that Charlie has verified completion.";
+    const message = [
+      "Charlie mission " + row.id + ", work " + spec.key + ".",
+      "Goal: " + row.plan.goal,
+      "Task: " + spec.title,
+      "Verification criteria: " + spec.verificationCriteria,
+      "Execute within your authority. Return concrete evidence, uncertainty and blockers.",
+      "Do not claim that Charlie has verified completion.",
+    ].join("\n");
+    if (message.length > BOT_MESSAGE_MAX_LENGTH) {
+      return { error: "Delegation exceeds the bot-message size limit.", dispatched };
+    }
+    const attempt = (row.progress.find((item) => item.key === key)?.attempts ?? 0) + 1;
 
     const sent = await messageBot(
       ctx.deps,
@@ -239,7 +262,7 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
         bot_id: spec.assigneeBotId,
         message,
         intent: "request",
-        deliveryKey: deliveryKey(row.id, key),
+        deliveryKey: deliveryKey(row.id, key, attempt),
       },
     );
     if (!sent.ok) {
@@ -249,7 +272,7 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
     const old = row.progress.find((item) => item.key === key);
     const next: Progress[] = [
       ...row.progress.filter((item) => item.key !== key),
-      { key, state: "queued", attempts: (old?.attempts ?? 0) + 1 },
+      { key, state: "queued", attempts: attempt },
     ];
     const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
       'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
@@ -306,4 +329,69 @@ export async function missionSubmit(ctx: RunContext, args: Record<string, unknow
   if (!updated.length) return { error: "Concurrent change; inspect mission_status and retry." };
   return { ok: true, ...rowView(parseRow(updated[0]!)),
     note: "Execution submitted, not verified. Dependent work remains blocked." };
+}
+
+
+/**
+ * Reconcile durable mission progress against actual child-run states.
+ * Only a new owner-originated Chief turn may mutate missions.
+ * Completed runs stay queued until their evidence is explicitly submitted;
+ * the coordinator never silently treats execution as independent verification.
+ */
+export async function missionReconcile(ctx: RunContext, args: Record<string, unknown>) {
+  if (!(await ownerAuthorized(ctx))) {
+    return { error: "A fresh authenticated owner request to Charlie is required." };
+  }
+  const id = stringValue(args.missionId, 128);
+  if (!id) return { error: "missionId is required." };
+  const row = await findMission(ctx, id);
+  if (!row || row.chiefBotId !== ctx.bot.id) return { error: "Mission not found." };
+
+  const deadlineExceeded =
+    Date.now() >= row.createdAt.getTime() + row.plan.maxRuntimeSeconds * 1000;
+  const changes: string[] = [];
+  const next: Progress[] = [...row.progress];
+
+  for (const spec of row.plan.work) {
+    const prior = next.find((item) => item.key === spec.key);
+    if (prior?.state === "submitted" || prior?.state === "verified" ||
+        prior?.state === "failed" || prior?.state === "cancelled" ||
+        prior?.state === "blocked") continue;
+
+    const child = await delegatedRun(ctx, row, spec.key);
+    if (!child) continue;
+    const attempts = prior?.attempts ?? 1;
+    let newState: Progress["state"] | undefined;
+    if (child.status === "running") newState = "running";
+    if (child.status === "queued") newState = "queued";
+    if (child.status === "failed" || child.status === "cancelled") {
+      newState = attempts < spec.maxAttempts && !deadlineExceeded ? "planned" : "failed";
+    }
+    if (!newState || prior?.state === newState) continue;
+
+    const updated: Progress = {
+      key: spec.key,
+      state: newState,
+      attempts,
+    };
+    const idx = next.findIndex((item) => item.key === spec.key);
+    if (idx >= 0) next[idx] = updated;
+    else next.push(updated);
+    changes.push(spec.key + ":" + newState);
+  }
+
+  if (changes.length === 0) {
+    return { ok: true, changes, deadlineExceeded, ...rowView(row) };
+  }
+
+  const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+    'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
+      '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
+      'AND "revision"=$5 RETURNING *',
+    JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+  );
+  if (!updated.length) {
+    return { error: "Concurrent mission change; reread status and retry." };
+  }
+  return { ok: true, changes, deadlineExceeded, ...rowView(parseRow(updated[0]!)) };
 }
