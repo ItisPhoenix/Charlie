@@ -122,10 +122,13 @@ export async function missionCreate(
   }
 
   if (!stringValue(creationKey, 256)) return { error: "Invalid mission creation key." };
-  if (plan.work.some((item) => item.assigneeBotId === ctx.bot.id)) {
+  if (plan.work.some((item) =>
+    item.assigneeBotId === ctx.bot.id || item.verifierBotId === ctx.bot.id)) {
     return { error: "Chief must coordinate work, not delegate to itself." };
   }
-  const owners = [...new Set(plan.work.map((item) => item.assigneeBotId))];
+  const owners = [...new Set(plan.work.flatMap((item) =>
+    [item.assigneeBotId, ...(item.verifierBotId ? [item.verifierBotId] : [])],
+  ))];
   const bots = await ctx.deps.prisma.bot.findMany({
     where: {
       id: { in: owners },

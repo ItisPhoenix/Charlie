@@ -67,3 +67,19 @@ Never deploy an incomplete Phase 1 batch to production.
 - Canonical JSON plan comparisons no longer fail when PostgreSQL JSONB reorders keys.
 - Mission status and reviews remain owner-command-driven; automatic background
   recovery, encrypted storage and live multi-agent acceptance are still pending.
+
+## Batch 5 — Durable unattended mission continuation
+- Worker reconciler resumes persisted mission graphs after restart under a leader,
+  using actual agent run states. Auto-queued work uses durable per-attempt run
+  clientNonce plus mission row locking to prevent duplicate effects.
+- A real completed executor run with a recorded outcome submits evidence;
+  execution completion itself never means verified.
+- Work items may specify a separate verifierBotId; a real review run is started
+  automatically and only its distinct completed report can unlock dependents.
+- Dependents are queued only after reviewed success, within a per-mission
+  concurrency and runtime budget. Missing reviewer means awaiting manual review.
+- Automatic tasks use trigger charlie_mission or charlie_mission_review, and are
+  not owner-originated commands: they cannot inherit Gordon root authorization.
+- This batch is source-only, not a deployment. Mission data encryption,
+  isolated PostgreSQL migration acceptance, and live multi-agent tests are
+  required before production.

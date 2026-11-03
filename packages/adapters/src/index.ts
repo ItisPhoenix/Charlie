@@ -89,6 +89,7 @@ export * from "./installed-messaging-surface.js";
 export * from "./integration-provider-settings.js";
 export * from "./jev-auto-review.js";
 export * from "./job-reconciler.js";
+export * from "./charlie-mission-reconciler.js";
 export * from "./keenable-web.js";
 export * from "./key-provider-factory.js";
 export * from "./keyless-http-web.js";

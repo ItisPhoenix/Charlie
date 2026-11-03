@@ -1081,6 +1081,7 @@ export const builtinAgentTools: ConnectorTool[] = [
               key: { type: "string", description: "Unique lowercase key (3-64 characters)." },
               title: { type: "string", maxLength: 200 },
               assigneeBotId: { type: "string" },
+              verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
               dependsOn: { type: "array", items: { type: "string" } },
               verificationCriteria: { type: "string", maxLength: 2000 },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },

@@ -18,6 +18,8 @@ export type CharlieWorkSpec = {
   key: string;
   title: string;
   assigneeBotId: string;
+  /** Distinct specialist for unattended evidence review; omitted means manual review. */
+  verifierBotId?: string;
   dependsOn: readonly string[];
   verificationCriteria: string;
   maxAttempts: number;
@@ -86,6 +88,9 @@ export function validateCharlieMissionPlan(
         !validText(item.title, 200) ||
         !validText(item.assigneeBotId, 128) ||
         !validText(item.verificationCriteria, 2000) ||
+        (item.verifierBotId !== undefined &&
+          (!validText(item.verifierBotId, 128) ||
+            item.verifierBotId === item.assigneeBotId)) ||
         !whole(item.maxAttempts, 1, 5) ||
         !Array.isArray(item.dependsOn) ||
         item.dependsOn.length > 39) {
@@ -181,6 +186,9 @@ export function decideCharlieMissionWork(
   const submitted = plan.work.some((item) =>
     ["submitted", "verifying"].includes(stateOf(item.key)),
   );
+  const executing = plan.work.some((item) =>
+    ["queued", "running"].includes(stateOf(item.key)),
+  );
 
   // Never oversubscribe a previously persisted running mission.
   const capacity = Math.max(0, plan.maxConcurrentAgents - active);
@@ -205,7 +213,7 @@ export function decideCharlieMissionWork(
     failed || exhausted ? "failed" :
     blocked || (active === 0 && ready.length === 0 && !submitted)
       ? "blocked" :
-    submitted && active === 0 && ready.length === 0
+    submitted && !executing && ready.length === 0
       ? "awaiting_verification" :
     "running";
 
