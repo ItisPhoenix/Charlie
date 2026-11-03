@@ -139,7 +139,7 @@ class GordonHandler(socketserver.StreamRequestHandler):
     """Signed-command endpoint accessible only to the Charlie worker."""
 
     def send(self, result):
-        self.wfile.write(canonical(result) + b"\\n")
+        self.wfile.write(canonical(result) + b"\n")
 
     def handle(self):
         self.request.settimeout(5)
@@ -154,7 +154,7 @@ class GordonHandler(socketserver.StreamRequestHandler):
                 return
 
             raw = self.rfile.readline(MAX_REQUEST + 2)
-            if not raw.endswith(b"\\n") or len(raw) > MAX_REQUEST:
+            if not raw.endswith(b"\n") or len(raw) > MAX_REQUEST:
                 self.send({"ok": False, "error": "invalid_size"})
                 return
 
