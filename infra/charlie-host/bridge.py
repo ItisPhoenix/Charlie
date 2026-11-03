@@ -6,6 +6,7 @@ import json
 import os
 import re
 import socketserver
+import sqlite3
 import time
 from pathlib import Path
 
@@ -17,6 +18,31 @@ def canonical(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":")
     ).encode()
+
+NONCE_DB = "/var/lib/charlie-host/bridge_nonces.sqlite3"
+
+def claim_nonce(nonce, issued):
+    with sqlite3.connect(NONCE_DB, timeout=5) as db:
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS nonces (
+                nonce TEXT PRIMARY KEY,
+                issued_at INTEGER NOT NULL
+            )
+        """)
+        db.execute(
+            "DELETE FROM nonces WHERE issued_at < ?",
+            (int(time.time()) - 120,)
+        )
+        try:
+            db.execute(
+                "INSERT INTO nonces VALUES (?, ?)",
+                (nonce, issued)
+            )
+        except sqlite3.IntegrityError:
+            return False
+        return True
 
 class Handler(socketserver.StreamRequestHandler):
     def send(self, result):
@@ -58,6 +84,10 @@ class Handler(socketserver.StreamRequestHandler):
                 or not isinstance(nonce, str)
                 or not re.fullmatch(r"[0-9a-f]{32}", nonce)):
                 self.send({"ok": False, "error": "expired_or_invalid"})
+                return
+
+            if not claim_nonce(nonce, issued):
+                self.send({"ok": False, "error": "replay_detected"})
                 return
 
             if request.get("action") != "ping":
