@@ -54,6 +54,7 @@ import {
   AgentSkillCatalogEntrySchema,
   AgentSkillSchema,
   AppBootstrapSchema,
+  AppLocaleSchema,
   ApprovalModeSchema,
   ArtifactSchema,
   ArtifactVersionSchema,
@@ -66,6 +67,7 @@ import {
   BotSchema,
   BotSectionName,
   BotSectionSchema,
+  ByokIntervalSchema,
   CapabilityInstallSchema,
   CONNECTION_LABEL_MAX_LENGTH,
   ComputerModeSchema,
@@ -84,10 +86,12 @@ import {
   ExternalConversationPolicySchema,
   GroupDetailSchema,
   GroupSchema,
+  IncomingBotCallSchema,
   IntegrationCatalogResultSchema,
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
+  MemoryPromptBudgetSchema,
   MemoryScopeSchema,
   MeSchema,
   MessagingAgentConnectionSchema,
@@ -264,7 +268,14 @@ export const appContract = {
     /** Re-reads the subscription from the provider, e.g. right after a mobile checkout. */
     refresh: oc.output(BillingStatusSchema),
     selectFunding: oc
-      .input(z.object({ funding: z.enum(["byok", "credits"]), client: BillingClientSchema }))
+      .input(
+        z.object({
+          funding: z.enum(["byok", "credits"]),
+          client: BillingClientSchema,
+          /** Billing period of the own-key plan's checkout; monthly when omitted. */
+          interval: ByokIntervalSchema.optional(),
+        }),
+      )
       /** `url` is the checkout to pay for the own-key plan before it has access. */
       .output(z.object({ ok: z.literal(true), url: z.string().url().optional() })),
     purchaseCredits: oc
@@ -280,11 +291,19 @@ export const appContract = {
       .input(z.object({ amountCents: ModelCreditAmountSchema }))
       .output(z.object({ ok: z.literal(true) })),
     checkout: oc
-      .input(z.object({ client: BillingClientSchema }).optional())
+      .input(
+        z
+          .object({ client: BillingClientSchema, interval: ByokIntervalSchema.optional() })
+          .optional(),
+      )
       .output(z.object({ url: z.string().url() })),
     portal: oc
       .input(z.object({ client: BillingClientSchema }).optional())
       .output(z.object({ url: z.string().url() })),
+    /** Owners only: ends the running trial and bills the first period now. */
+    endTrial: oc.output(BillingStatusSchema),
+    /** Owners only: moves a monthly own-key plan to yearly, charging the difference now. */
+    switchToYearly: oc.output(BillingStatusSchema),
     /** Records who invited this organization; ignored once it has subscribed. */
     claimReferral: oc
       .input(z.object({ code: z.string().min(1).max(64) }))
@@ -303,10 +322,16 @@ export const appContract = {
           .object({
             avatarStyle: AvatarStyleSchema.optional(),
             timezone: TimeZoneSchema.nullable().optional(),
+            /** The language the app runs in, so emails can be written in it. */
+            locale: AppLocaleSchema.optional(),
           })
-          .refine((input) => input.avatarStyle !== undefined || input.timezone !== undefined, {
-            message: "Nothing to update",
-          }),
+          .refine(
+            (input) =>
+              input.avatarStyle !== undefined ||
+              input.timezone !== undefined ||
+              input.locale !== undefined,
+            { message: "Nothing to update" },
+          ),
       )
       .output(MeSchema),
     /** Saves a detected timezone only while none is saved, so it never replaces a choice. */
@@ -712,6 +737,7 @@ export const appContract = {
     list: oc
       .input(z.object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() }))
       .output(z.array(MemoryDocumentSchema)),
+    budget: oc.input(z.object({ botId: Id })).output(MemoryPromptBudgetSchema),
     update: oc
       .input(
         z.object({
@@ -1237,6 +1263,34 @@ export const appContract = {
     accountToken: oc.output(z.object({ token: z.string() })),
   },
   notifications: {
+    subscribeCalls: oc.output(
+      eventIterator(
+        z.object({
+          type: z.enum(["incoming.calls", "heartbeat"]),
+          payload: z.object({ calls: z.array(IncomingBotCallSchema) }).optional(),
+        }),
+      ),
+    ),
+    declineIncomingCall: oc
+      .input(z.object({ callId: z.string().uuid() }))
+      .output(z.object({ ok: z.literal(true) })),
+    registerCallPush: oc
+      .input(
+        z
+          .object({
+            deviceId: z.string().uuid(),
+            platform: z.enum(["ios", "android"]),
+            expoToken: z.string().min(8).max(512).regex(/^\S+$/).optional(),
+            voipToken: z
+              .string()
+              .regex(/^[a-fA-F0-9]{64,200}$/)
+              .optional(),
+          })
+          .refine((value) =>
+            Boolean(value.expoToken || (value.platform === "ios" && value.voipToken)),
+          ),
+      )
+      .output(z.object({ ok: z.literal(true) })),
     registerPush: oc
       // No whitespace: the token store keeps the registering session on the next line.
       .input(z.object({ token: z.string().min(8).max(512).regex(/^\S+$/) }))

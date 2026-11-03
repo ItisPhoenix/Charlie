@@ -12,11 +12,16 @@ import type {
 } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import { FLEET_TOOL_NAMES } from "@rakazo/contracts";
-import { isToolPauseResult } from "./approval-effect.js";
+import {
+  isInternalTermination,
+  isTerminatingReplyResult,
+  isToolPauseResult,
+} from "./approval-effect.js";
 import {
   connectionIdArgument,
   credentialArgument,
   loginFieldLabelsArgument,
+  oneTimeCodeArgument,
 } from "./bot-secrets.js";
 import { FIND_TOOL, findTools, partitionTools, USE_TOOL } from "./builtin-tool-bridge.js";
 import { shortenToolResultText } from "./context-selection.js";
@@ -295,6 +300,7 @@ export function prepareRequestSecretArguments(raw: Record<string, unknown>) {
     purpose,
     ...(connectionId ? { connectionId } : {}),
     ...(credential !== undefined ? { credential } : {}),
+    ...(raw.oneTimeCode !== undefined ? { oneTimeCode: oneTimeCodeArgument(raw.oneTimeCode) } : {}),
     ...(raw.replace === true ? { replace: true } : {}),
     ...(raw.fields != null ? { fields: loginFieldLabelsArgument(raw.fields) } : {}),
   };
@@ -313,8 +319,11 @@ function toAgentTool(
     // Pi runs a turn's tool calls concurrently by default, so a batch that
     // creates a routine and lists routines can read the list before the row
     // exists. Pi runs the whole batch in order when any call in it is
-    // sequential. Remember also needs this to avoid competing revision writes.
-    ...(SCHEDULE_TOOL_NAMES.has(tool.name) || tool.name === "remember"
+    // sequential. Remember also needs this to avoid competing revision writes, and request_secret
+    // so a sibling request cannot start after one pauses for its card and share its answer.
+    ...(SCHEDULE_TOOL_NAMES.has(tool.name) ||
+    tool.name === "remember" ||
+    tool.name === "request_secret"
       ? { executionMode: "sequential" as const }
       : {}),
     parameters: parametersFor(tool),
@@ -323,7 +332,7 @@ function toAgentTool(
       if (tool.name === "remember") {
         return {
           content: String(raw.content ?? ""),
-          path: String(raw.path ?? "MEMORY.md"),
+          ...(typeof raw.old_text === "string" && raw.old_text ? { old_text: raw.old_text } : {}),
         };
       }
       if (tool.name === "request_takeover") {
@@ -581,8 +590,9 @@ function toAgentTool(
             throw error;
           } finally {
             // Pi only terminates a parallel batch when every result terminates.
-            // A single paused call must stop the turn before another model request.
-            if (host.pausePending) host.abortTurn?.();
+            // A single paused or turn-ending call must stop the turn before another
+            // model request, or the next assistant message replaces its final reply.
+            if (host.pausePending || isTerminatingReplyResult(result)) host.abortTurn?.();
             const details = (
               result as AgentToolResult<{ error?: unknown; isError?: unknown }> | undefined
             )?.details;
@@ -618,6 +628,8 @@ function isAgentToolExecutionResult(result: unknown): result is AgentToolExecuti
     !result ||
     typeof result !== "object" ||
     (result as { kind?: unknown }).kind !== "agent_tool_result" ||
+    (((result as { terminate?: unknown }).terminate === true || isToolPauseResult(result)) &&
+      !isInternalTermination(result)) ||
     !("content" in result)
   ) {
     return false;

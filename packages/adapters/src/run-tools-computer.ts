@@ -6,7 +6,7 @@ import { redactSecrets, sandboxCommandTimeoutMs } from "@rakazo/core";
 import { RunHistoryWriteError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { redactShellStreams } from "./agent-environment.js";
-import { resolveLoginFill, shellCommandEnvironment } from "./bot-secrets.js";
+import { resolveCodeFill, resolveLoginFill, shellCommandEnvironment } from "./bot-secrets.js";
 import {
   browserActFromTool,
   browserNavigateFromTool,
@@ -16,6 +16,7 @@ import {
 } from "./browser-tools.js";
 import { BACKGROUND_WORK_LAUNCH } from "./computer-idle.js";
 import {
+  displayBotWorkspacePath,
   resolveBotUploadPath,
   resolveBotWorkspaceCwd,
   resolveBotWorkspacePath,
@@ -36,6 +37,7 @@ import {
 } from "./desktop-command-guard.js";
 import { executeGordonHostCommand } from "./gordon-host.js";
 import { nativeShellCommandArgv, usesNativeShell } from "./native-shell.js";
+import { purchaseApprovalOf } from "./purchase-gate.js";
 import { resolvePurchaseCardFill, resolvePurchasePayTokenFill } from "./purchase-service.js";
 import type { RunContext } from "./run-context.js";
 import { addRunSecrets } from "./run-context.js";
@@ -143,6 +145,13 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
   const redactions = () => [...ctx.secrets];
   const desktopTools =
     ctx.computer.graphicalToolsAllowed && builtinOffered(ctx.tools.disabled, "computer_act");
+  // A file the page downloads goes to the bot's own Downloads folder. Its name is redacted like any
+  // page text, so one that echoes a secret is listed under another name than it has on disk.
+  const downloads = {
+    folder: resolveBotWorkspacePath(ctx.computer.mode, bot.id, "Downloads"),
+    botPath: (path: string) =>
+      displayBotWorkspacePath(ctx.computer.mode, bot.id, "Downloads", path),
+  };
   const tool =
     name === "browser_navigate"
       ? browserNavigateFromTool
@@ -150,10 +159,13 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
         ? browserSnapshotFromTool
         : null;
   return computerScreenToolResult(async () => {
+    // A call that presses an approved purchase spends it: a card it types leaves no pass for the next one.
+    const paying = purchaseApprovalOf(args.purchaseApproval);
     const result = tool
       ? redactBrowserResult(
           await tool(ctx.providers.browser, await ctx.computer.get("tool", name), context, args, {
             desktopTools,
+            downloads,
           }),
           redactions(),
         )
@@ -164,7 +176,9 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
           args,
           {
             desktopTools,
+            downloads,
             redactions,
+            approvedPurchase: paying,
             // Team bots may send only their own folder or shared/ off the computer; a
             // private computer's helper already confines uploads to its home folder.
             uploadRoots:
@@ -199,7 +213,20 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
               );
               if ("error" in resolved) return resolved;
               addRunSecrets(ctx, resolved.redactions);
+              if (!paying) ctx.state.walletHosts.add(new URL(resolved.origin).host);
               return { text: resolved.text, origin: resolved.origin };
+            },
+            resolveCodeFill: async () => {
+              const resolved = await resolveCodeFill({
+                prisma: deps.prisma,
+                secretStore: deps.secretStore,
+                scope: run,
+                runId: run.id,
+              });
+              if ("error" in resolved) return resolved;
+              addRunSecrets(ctx, resolved.redactions);
+              const { text, origin, claim, restore } = resolved;
+              return { text, origin, claim, restore };
             },
             resolvePayTokenFill: async (step) => {
               const paymentWallet = deps.paymentWallet;
@@ -212,10 +239,13 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
               if ("error" in resolved) return resolved;
               addRunSecrets(ctx, resolved.redactions);
               const { text, origin, merchantAccountId } = resolved;
+              if (!paying) ctx.state.walletHosts.add(new URL(origin).host);
               return { text, origin, merchantAccountId };
             },
           },
         );
+    // A snapshot saves the PDF its tab shows, which is a new file on the computer.
+    if ((result as { downloads?: unknown } | null)?.downloads) ctx.computer.checkpoint.markDirty();
     ctx.state.screen.unchangedVisualStreak = unchangedVisualStreakAfterPageBrowser(
       ctx.state.screen.unchangedVisualStreak,
       name,
@@ -285,7 +315,7 @@ export const computerTools: ToolHandlers = {
           error: "An authenticated Chief-to-Gordon delegation is required for Ubuntu host commands.",
         });
 
-      if (args.cwd)
+      if (args.cwd && args.cwd !== "/")
         return call.finish({
           error: "Host commands start in /. Include cd in the command when needed.",
         });

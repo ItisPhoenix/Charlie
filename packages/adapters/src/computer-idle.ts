@@ -28,6 +28,7 @@ import { getLogger } from "@rakazo/logging";
 import { activeCodingAgent } from "./coding-agent-activity.js";
 import { expireComputerControl, hasActiveComputerControl } from "./computer-control.js";
 import { screenLeaseIdForRun, toComputerRef } from "./computer-lifecycle.js";
+import { BrowserStillRunningError } from "./computer-screens.js";
 import { checkpointComputerWorkspace } from "./computer-workspace.js";
 import { HomeSaveConflictError } from "./home-object-store.js";
 import { sandboxAllowanceUsedUp } from "./sandbox-allowance.js";
@@ -335,6 +336,16 @@ export function computerMaxActiveMs(): number {
     : DEFAULT_COMPUTER_MAX_ACTIVE_MS;
 }
 
+/**
+ * Uptime cap for providers that do not bill while running, so one abandoned background command
+ * cannot hold a self-hosted computer and its memory for days. COMPUTER_MAX_ACTIVE_UNBILLED_MS
+ * configures it; unset, 0, or an invalid value leaves it off.
+ */
+export function unbilledComputerMaxActiveMs(): number {
+  const raw = Number(process.env.COMPUTER_MAX_ACTIVE_UNBILLED_MS?.trim() || 0);
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : 0;
+}
+
 export function computerIdleSleepEnabled(): boolean {
   return process.env.SANDBOX_IDLE_MS?.trim() !== "0";
 }
@@ -369,13 +380,13 @@ function activeLimitReached(
   ref: ComputerRef,
   runningSince: Date | null | undefined,
 ): boolean {
-  const limit = computerMaxActiveMs();
-  return (
-    limit > 0 &&
-    sandbox.billsWhileRunning?.(ref) === true &&
-    runningSince != null &&
-    Date.now() - runningSince.getTime() >= limit
-  );
+  // Electron owns a native computer's lifetime.
+  if (ref.kind === "desktop") return false;
+  const limit =
+    sandbox.billsWhileRunning?.(ref) === true
+      ? computerMaxActiveMs()
+      : unbilledComputerMaxActiveMs();
+  return limit > 0 && runningSince != null && Date.now() - runningSince.getTime() >= limit;
 }
 
 export async function touchRunningComputer(
@@ -463,7 +474,7 @@ export async function sleepComputerIfIdle(
   // when they next need it. A user in control is left alone: control leases expire on their
   // own, and that release resumes the waiting run.
   // Otherwise a run waiting for takeover holds an unbilled computer for TAKEOVER_IDLE_GRACE_MS.
-  // Once its organization has spent the month's allowance, nothing but a user still in control,
+  // Once its organization has spent this period's allowance, nothing but a user still in control,
   // not even a working coding agent, holds the computer up.
   const activeControl = hasActiveComputerControl(computer);
   const allowanceUsed = !activeControl && (await sandboxAllowanceUsedUp(deps, computer));
@@ -901,7 +912,9 @@ export function sleepDeferReason(error: unknown): string | undefined {
             : "too_many_files"
           : error instanceof HomeSaveConflictError
             ? "saved_elsewhere"
-            : undefined;
+            : error instanceof BrowserStillRunningError
+              ? "browser_running"
+              : undefined;
 }
 
 /**

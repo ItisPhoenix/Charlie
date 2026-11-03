@@ -13,14 +13,8 @@ import Markdown, {
 } from "@ronradtke/react-native-markdown-display";
 import { Highlight, themes } from "prism-react-renderer";
 import type { ComponentType, ReactNode } from "react";
-import { createContext, memo, useCallback, useContext, useMemo, useState } from "react";
-import type {
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  StyleProp,
-  TextStyle,
-  ViewStyle,
-} from "react-native";
+import { createContext, Fragment, memo, useCallback, useContext, useMemo, useState } from "react";
+import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
   Alert,
   I18nManager,
@@ -37,6 +31,7 @@ import {
 import type { ChatMarkdownProps } from "./markdown";
 import {
   inlineMarkdownImageSrc,
+  isProseFence,
   LinkFaviconsContext,
   LinkFaviconsPausedContext,
   linkFaviconOrigin,
@@ -72,6 +67,7 @@ const MONO_FONT = Platform.select({ ios: "ui-monospace", default: "monospace" })
 const BULLET_SIZE = 5;
 // List markers sit in an 18 pt column, 8 pt before the item text.
 const MARKER_COLUMN = 18;
+const TASK_BOX_SIZE = 14;
 const MARKER_GAP = 8;
 // Advances at the list-number size (15 pt): a tabular digit, and the "." or ")" after it.
 const NUMBER_DIGIT_WIDTH = 9.6;
@@ -101,6 +97,51 @@ const POP_ISOLATE = "\u2069";
 const markdownParser = createMarkdownIt();
 markdownParser.validateLink = keepMarkdownLinkToken;
 linkifyExplicitUrls(markdownParser);
+markTaskListItems(markdownParser);
+
+const TASK_MARKER = /^\[([ xX])\]\s+/;
+// The first text token ends at a line break, so its marker may have nothing after it.
+const TASK_MARKER_TOKEN = /^\[([ xX])\](?:\s+|$)/;
+
+/** The parts of a markdown-it token the task list rule reads and writes. */
+type ParsedToken = {
+  type: string;
+  content: string;
+  children: ParsedToken[] | null;
+  attrSet(name: string, value: string): void;
+};
+
+/**
+ * GitHub task lists, as web renders them: a list item starting `[ ]` or `[x]` loses that text
+ * and carries its state, so the list item rule draws a checkbox instead.
+ */
+function markTaskListItems(parser: typeof markdownParser) {
+  parser.core.ruler.after("inline", "task_list_items", (state: { tokens: ParsedToken[] }) => {
+    const tokens = state.tokens;
+    for (let index = 2; index < tokens.length; index += 1) {
+      const inline = tokens[index];
+      const item = tokens[index - 2];
+      if (
+        inline?.type !== "inline" ||
+        tokens[index - 1]?.type !== "paragraph_open" ||
+        item?.type !== "list_item_open"
+      )
+        continue;
+      const first = inline.children?.[0];
+      // Read the source, so an escaped `\[x\]` stays literal text.
+      const match = TASK_MARKER.exec(inline.content);
+      const token = first?.type === "text" ? TASK_MARKER_TOKEN.exec(first.content) : null;
+      if (!first || !match || !token) continue;
+      first.content = first.content.slice(token[0].length);
+      // A marker alone on its line leaves the break that followed it leading the text.
+      if (!first.content && inline.children?.[1]?.type === "softbreak") {
+        inline.children.splice(1, 1);
+      }
+      inline.content = inline.content.replace(TASK_MARKER, "");
+      item.attrSet("data-task", match[1] === " " ? "open" : "done");
+    }
+  });
+}
 
 /** The code of each fenced or indented block in a message, as its copy button copies it. */
 export function markdownCodeBlocks(markdown: string): string[] {
@@ -221,6 +262,11 @@ function markdownStyles(palette: ColorTokens) {
       borderBottomColor: palette.border,
     },
     fence_token: codeText,
+    // Prose in a fence reads in the body font, not the monospaced one.
+    fence_prose: {
+      color: palette.foreground,
+      ...typeScale.body,
+    },
     fence_language_label: {
       color: palette.foreground,
       fontFamily: MONO_FONT,
@@ -511,56 +557,11 @@ function textStyleForParents(
 }
 
 const TABLE_FONT_SIZE = typeScale.caption.fontSize;
-const TABLE_LINE_HEIGHT = typeScale.caption.lineHeight;
-const TABLE_CELL_PADDING = 5;
-const TABLE_SINGLE_LINE_HEIGHT = TABLE_LINE_HEIGHT + TABLE_CELL_PADDING * 2;
 const TABLE_CELL_GUTTER = 16;
 const TABLE_MIN_COLUMN_WIDTH = 64;
 const TABLE_MAX_COLUMN_WIDTH = 220;
-const TABLE_VISIBLE_EDGE = 8;
 
-type TableLayout = {
-  widths: readonly number[];
-  viewportWidth: number;
-  scrollX: number;
-};
-
-const TableLayoutContext = createContext<TableLayout>({
-  widths: [],
-  viewportWidth: 0,
-  scrollX: 0,
-});
-
-function columnOffset(widths: readonly number[], index: number) {
-  let offset = 0;
-  for (let cursor = 0; cursor < index; cursor++) offset += widths[cursor] ?? 0;
-  return offset;
-}
-
-function columnContributesHeight(
-  index: number,
-  widths: readonly number[],
-  viewportWidth: number,
-  scrollX: number,
-) {
-  const start = columnOffset(widths, index);
-  const width = widths[index] ?? 0;
-  if (width <= 0) return false;
-  if (viewportWidth <= 0) return start === 0;
-  const overlap = Math.min(start + width, scrollX + viewportWidth) - Math.max(start, scrollX);
-  return overlap > TABLE_VISIBLE_EDGE;
-}
-
-function heightMask(widths: readonly number[], viewportWidth: number, scrollX: number) {
-  return widths
-    .map((_, index) => (columnContributesHeight(index, widths, viewportWidth, scrollX) ? "1" : "0"))
-    .join("");
-}
-
-const offscreenCell: ViewStyle = {
-  height: TABLE_SINGLE_LINE_HEIGHT,
-  overflow: "hidden",
-};
+const TableColumnWidthsContext = createContext<readonly number[]>([]);
 
 function glyphEm(char: string) {
   if (char === " " || char === "\n" || char === "\t") return 0.33;
@@ -662,14 +663,9 @@ function TableCell({
   baseStyle: StyleProp<ViewStyle>;
   children?: ReactNode;
 }) {
-  const { widths, viewportWidth, scrollX } = useContext(TableLayoutContext);
+  const widths = useContext(TableColumnWidthsContext);
   const width = widths[columnIndex] ?? TABLE_MIN_COLUMN_WIDTH;
-  const contributes = columnContributesHeight(columnIndex, widths, viewportWidth, scrollX);
-  return (
-    <View style={[baseStyle, columnStyle(width), contributes ? null : offscreenCell]}>
-      {children}
-    </View>
-  );
+  return <View style={[baseStyle, columnStyle(width)]}>{children}</View>;
 }
 
 function TableRow({
@@ -679,7 +675,7 @@ function TableRow({
   baseStyle: StyleProp<ViewStyle>;
   children?: ReactNode;
 }) {
-  const { widths } = useContext(TableLayoutContext);
+  const widths = useContext(TableColumnWidthsContext);
   const rowWidth = widths.reduce((total, width) => total + width, 0);
   return (
     <View style={[baseStyle, { width: rowWidth, minWidth: rowWidth, flexShrink: 0 }]}>
@@ -703,13 +699,11 @@ const scrollFrame: ViewStyle = {
 function SidewaysScrollView({
   contentWidth,
   onViewportWidth,
-  onScroll,
   style,
   children,
 }: {
   contentWidth?: number;
   onViewportWidth?: (width: number) => void;
-  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
 }) {
@@ -735,8 +729,6 @@ function SidewaysScrollView({
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled
         directionalLockEnabled
-        scrollEventThrottle={16}
-        onScroll={onScroll}
         onContentSizeChange={measured ? (next) => setMeasuredWidth(Math.round(next)) : undefined}
         style={[
           style,
@@ -771,31 +763,17 @@ function TableScrollView({
   style?: StyleProp<ViewStyle>;
 }) {
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [scrollX, setScrollX] = useState(0);
   const widths = useMemo(() => fittedColumnWidths(table, viewportWidth), [table, viewportWidth]);
-  const tableLayout = useMemo(
-    () => ({ widths, viewportWidth, scrollX }),
-    [widths, viewportWidth, scrollX],
-  );
-  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = event.nativeEvent.contentOffset.x;
-    setScrollX((current) =>
-      heightMask(widths, viewportWidth, current) === heightMask(widths, viewportWidth, next)
-        ? current
-        : next,
-    );
-  };
   return (
-    <TableLayoutContext.Provider value={tableLayout}>
+    <TableColumnWidthsContext.Provider value={widths}>
       <SidewaysScrollView
         contentWidth={widths.reduce((total, width) => total + width, 0)}
         onViewportWidth={setViewportWidth}
-        onScroll={onScroll}
         style={style}
       >
         {children}
       </SidewaysScrollView>
-    </TableLayoutContext.Provider>
+    </TableColumnWidthsContext.Provider>
   );
 }
 
@@ -866,11 +844,7 @@ function CodeFence({
   const theme = colorScheme === "dark" ? themes.oneDark : themes.oneLight;
   return (
     <View style={styleMap._VIEW_SAFE_fence}>
-      {language ? (
-        <View style={styleMap._VIEW_SAFE_fence_header}>
-          <Text style={styleMap.fence_language_label}>{language}</Text>
-        </View>
-      ) : null}
+      <FenceHeader language={language} styleMap={styleMap} />
       <CodeScrollView code={code}>
         <Highlight theme={theme} code={code} language={language || "text"}>
           {({ tokens, getTokenProps }) => (
@@ -911,6 +885,59 @@ function CodeFence({
           )}
         </Highlight>
       </CodeScrollView>
+    </View>
+  );
+}
+
+/** A fence's language label, above its code. */
+function FenceHeader({ language, styleMap }: { language: string; styleMap: MarkdownStyleMap }) {
+  if (!language) return null;
+  return (
+    <View style={styleMap._VIEW_SAFE_fence_header}>
+      <Text style={styleMap.fence_language_label}>{language}</Text>
+    </View>
+  );
+}
+
+/**
+ * A fence marked as plain text. Its lines wrap in the body font instead of keeping their shape
+ * and scrolling sideways.
+ */
+function ProseFence({
+  code,
+  language,
+  styleMap,
+}: {
+  code: string;
+  language: string;
+  styleMap: MarkdownStyleMap;
+}) {
+  const CopyButton = useContext(CodeCopyButtonContext);
+  const prose = (
+    <View style={[styleMap._VIEW_SAFE_fence_code, layout.proseCode]}>
+      {code.split("\n").map((line, index) => (
+        // An empty line keeps its height through a space, as a blank code line does. Each line
+        // aligns by its own direction, as a paragraph does.
+        <Text
+          key={index}
+          style={[styleMap.fence_prose, contraryDirection(line) && layout.farSideText]}
+        >
+          {line || " "}
+        </Text>
+      ))}
+    </View>
+  );
+  return (
+    <View style={styleMap._VIEW_SAFE_fence}>
+      <FenceHeader language={language} styleMap={styleMap} />
+      {CopyButton && /\S/.test(code) ? (
+        <View style={layout.codeRow}>
+          {prose}
+          <CopyButton code={code} />
+        </View>
+      ) : (
+        prose
+      )}
     </View>
   );
 }
@@ -965,6 +992,43 @@ function listItemRule(
   const list = parent.find(
     (ancestor) => ancestor.type === "bullet_list" || ancestor.type === "ordered_list",
   );
+  const task = node.attributes?.["data-task"];
+  if (task === "open" || task === "done") {
+    const color =
+      (StyleSheet.flatten(styleMap.bullet_list_icon) as TextStyle | undefined)?.color ??
+      body?.color;
+    // VoiceOver reads the item as one checkbox with its state. An item holding a nested list
+    // makes only its box the checkbox, so each nested item keeps its own.
+    const nested = node.children.some(
+      (child) => child.type === "bullet_list" || child.type === "ordered_list",
+    );
+    const checkbox = {
+      accessible: true,
+      accessibilityRole: "checkbox" as const,
+      accessibilityLabel: cellPlainText(nested ? (node.children[0] ?? node) : node).trim(),
+      accessibilityState: { checked: task === "done" },
+    };
+    return (
+      <View key={node.key} style={row} {...(nested ? {} : checkbox)}>
+        <View
+          style={[layout.bulletMarker, direction ? layout.taskAfter : layout.taskBefore]}
+          {...(nested ? checkbox : {})}
+        >
+          <Text style={marker} accessible={false} importantForAccessibility="no">
+            {ZERO_WIDTH_SPACE}
+          </Text>
+          <View style={[layout.taskBox, { borderColor: color }]}>
+            {task === "done" ? (
+              <Text style={[layout.taskCheck, { color }]} accessible={false}>
+                ✓
+              </Text>
+            ) : null}
+          </View>
+        </View>
+        <View style={layout.listContent}>{children}</View>
+      </View>
+    );
+  }
   if (list?.type === "bullet_list") {
     // A dot in the list-marker colour, centred on the item's first line, at the end of the marker
     // column. The invisible character gives the marker that line's height at the current text size.
@@ -1011,11 +1075,14 @@ const renderRules: RenderRules = {
   fence: (node, _children, _parents, styleMap, _onCopyCode, colorScheme) => {
     const info = typeof node.sourceInfo === "string" ? node.sourceInfo : "";
     const source = node.content.replace(/\n$/, "");
-    const codeBlock = (
+    const language = info.trim().split(/\s+/)[0] ?? "";
+    const codeBlock = isProseFence(language) ? (
+      <ProseFence key={node.key} code={source} language={language} styleMap={styleMap} />
+    ) : (
       <CodeFence
         key={node.key}
         code={source}
-        language={info.trim().split(/\s+/)[0] ?? ""}
+        language={language}
         colorScheme={colorScheme === "dark" ? "dark" : "light"}
         styleMap={styleMap}
       />
@@ -1320,6 +1387,8 @@ type LinkifiedTextProps = {
   color: string;
   linkColor: string;
   palette: ColorTokens;
+  /** Renders the runs between links, which are plain strings by default. */
+  renderText?: (text: string) => ReactNode;
 };
 
 export const LinkifiedText = memo(function LinkifiedText({
@@ -1327,6 +1396,7 @@ export const LinkifiedText = memo(function LinkifiedText({
   color,
   linkColor,
   palette,
+  renderText,
 }: LinkifiedTextProps) {
   const openLink = useNativeLinkConfirm();
   const labelStyle: TextStyle = {
@@ -1339,7 +1409,13 @@ export const LinkifiedText = memo(function LinkifiedText({
   return (
     <Text style={[{ color, ...typeScale.body }, contraryDirection(children) && layout.farSideText]}>
       {plainTextLinkParts(children).map((part, index) => {
-        if (part.type === "text") return part.value;
+        if (part.type === "text") {
+          return renderText ? (
+            <Fragment key={index}>{renderText(part.value)}</Fragment>
+          ) : (
+            part.value
+          );
+        }
         const open = () => {
           openLink(part.href);
         };
@@ -1459,6 +1535,23 @@ const layout = StyleSheet.create({
     height: BULLET_SIZE,
     borderRadius: BULLET_SIZE / 2,
   },
+  taskBefore: {
+    marginLeft: MARKER_COLUMN - TASK_BOX_SIZE,
+    marginRight: MARKER_GAP,
+  },
+  taskAfter: {
+    marginLeft: MARKER_GAP,
+    marginRight: MARKER_COLUMN - TASK_BOX_SIZE,
+  },
+  taskBox: {
+    width: TASK_BOX_SIZE,
+    height: TASK_BOX_SIZE,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  taskCheck: { fontSize: 11, lineHeight: 13, fontWeight: "700" },
   // Deliberately no `flex: 1`: an automatic basis gives the item its text's natural width.
   listContent: {
     flexGrow: 1,
@@ -1474,6 +1567,12 @@ const layout = StyleSheet.create({
   codeRow: {
     flexDirection: "row",
     alignItems: "flex-start",
+  },
+  // A prose fence wraps, so its text takes the width the copy control leaves it.
+  proseCode: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   codeFrame: {
     overflow: "hidden",
@@ -1510,5 +1609,10 @@ const layout = StyleSheet.create({
 });
 
 export type { ChatMarkdownProps, LinkFavicons } from "./markdown";
-export { LinkFaviconsContext, RemoteImagesContext, withBlockMentions } from "./markdown";
+export {
+  LinkFaviconsContext,
+  plainTextLinkParts,
+  RemoteImagesContext,
+  withBlockMentions,
+} from "./markdown";
 export { MarkdownLinkPromptProvider } from "./markdown-link-prompt";

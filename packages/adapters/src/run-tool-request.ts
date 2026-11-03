@@ -3,6 +3,7 @@ import { BOT_INSTRUCTIONS_MAX_LENGTH } from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
 import { prepareAgentConnectionResponse } from "./agent-connections.js";
 import type { FleetCardSummary } from "./approval-ask.js";
+import type { TerminatingToolResult } from "./approval-effect.js";
 import {
   approvalReplayPathError,
   approvalReplayResourceError,
@@ -21,8 +22,20 @@ import { sanitizeConnectorError } from "./connector-safety.js";
 import { isFleetApprovalTool, prepareFleetRequest } from "./fleet-tools.js";
 import { assertConnectorToolArgs, CATALOG_EXECUTE } from "./lazy-tool-catalog.js";
 import { paidRequestEffect, restorePaidRequest } from "./paid-request.js";
+import type { PurchaseApproval } from "./purchase-gate.js";
+import {
+  detectPurchase,
+  PURCHASE_CHECKED_TOOLS,
+  purchaseApprovalOf,
+  purchaseCardSummary,
+} from "./purchase-gate.js";
 import type { RunContext } from "./run-context.js";
-import { isRunTainted, neverAsks, OWN_INSTRUCTIONS_BASELINE_UNKNOWN_ERROR } from "./run-context.js";
+import {
+  isRunTainted,
+  neverAsks,
+  OWN_INSTRUCTIONS_BASELINE_UNKNOWN_ERROR,
+  refuseOwnerSettingsChange,
+} from "./run-context.js";
 import {
   approvalReplayEffectToolName,
   CATALOG_APPROVAL_TOOL,
@@ -51,9 +64,14 @@ export interface ToolRequest {
   fleetSummary: FleetCardSummary | undefined;
   /** Gated like a consequential action, even when the tool alone is not. */
   heldForApproval: boolean;
+  /** This page tool call completes a purchase, which a person approves each time. */
+  purchase: PurchaseApproval | undefined;
 }
 
 type ToolError = { error: string };
+
+/** A prepare-step refusal: a plain error, or a result that ends the turn on a repeat. */
+type PrepareRefusal = ToolError | TerminatingToolResult;
 
 /**
  * Resolve catalog and bound connector routes, and line the call up with the next approved
@@ -118,6 +136,7 @@ export async function resolveToolRequest(
                 connectorId: resolved.tool.route.connectorId,
                 resourceId: resolved.tool.route.resourceId,
                 resourceRevision: resolved.tool.route.resourceRevision,
+                connectionId: resolved.tool.route.connectionId,
                 toolName: resolved.tool.route.toolName,
               }
             : undefined,
@@ -145,6 +164,7 @@ export async function resolveToolRequest(
         connectorId: connectorCall.route.connectorId,
         resourceId: connectorCall.route.resourceId,
         resourceRevision: connectorCall.route.resourceRevision,
+        connectionId: connectorCall.route.connectionId,
         toolName: connectorCall.route.toolName,
       },
       args,
@@ -165,6 +185,7 @@ export async function resolveToolRequest(
           connectorId: connectorCall.route.connectorId,
           resourceId: connectorCall.route.resourceId,
           resourceRevision: connectorCall.route.resourceRevision,
+          connectionId: connectorCall.route.connectionId,
           toolName: connectorCall.route.toolName,
         }
       : undefined;
@@ -260,6 +281,7 @@ export async function resolveToolRequest(
     replayEffectToolName,
     fleetSummary: undefined,
     heldForApproval: false,
+    purchase: undefined,
   };
 }
 
@@ -270,7 +292,7 @@ export async function resolveToolRequest(
 export async function prepareToolRequest(
   ctx: RunContext,
   request: ToolRequest,
-): Promise<ToolError | undefined> {
+): Promise<PrepareRefusal | undefined> {
   const { deps, run, bot } = ctx;
   const { name, executionId, nextApprovedTool } = request;
   let { args } = request;
@@ -338,6 +360,50 @@ export async function prepareToolRequest(
       return { error: "connection request is no longer pending" };
     }
   }
+  if (PURCHASE_CHECKED_TOOLS.has(name)) {
+    // The approval is written here from what the page says; a model-supplied one is dropped, and an
+    // approved replay keeps the one the user saw.
+    const { purchaseApproval: given, ...rest } = args;
+    const approved = nextApprovedTool === name ? purchaseApprovalOf(given) : undefined;
+    args = approved ? args : rest;
+    // A desktop press has no check on the page right before it, as a browser_act click does: one the user
+    // approved goes ahead only while the page still shows what the card did. A card that named nothing
+    // (the check failed) has nothing to compare.
+    if (
+      name === "computer_act" &&
+      approved &&
+      (approved.site || approved.label || approved.amount)
+    ) {
+      const now = await detectPurchase(ctx, name, rest);
+      if (
+        !now ||
+        now.site !== approved.site ||
+        now.label !== approved.label ||
+        now.amount !== approved.amount
+      )
+        return {
+          error:
+            "The page changed since the user approved this purchase, so nothing was pressed. Look at the screen and try again.",
+        };
+    }
+    const purchase = approved ?? (await detectPurchase(ctx, name, rest));
+    // An approval given for something else never covers a purchase: the call is made again and asks.
+    if (purchase && !approved && nextApprovedTool === name)
+      return {
+        error:
+          "This would complete a purchase, which the user has not approved, so nothing was pressed. Call the tool again with only that step; that asks the user.",
+      };
+    if (purchase) {
+      args = { ...rest, purchaseApproval: purchase };
+      // The wallet owner approved paying at a site this run typed the approved card or pay token into: the
+      // click still carries the approval to the page, with no card. Spent on the first purchase click there.
+      if (approved || !ctx.state.walletHosts.delete(purchase.site)) {
+        request.purchase = purchase;
+        request.fleetSummary = purchaseCardSummary(purchase);
+      }
+    }
+    if (purchase || given !== undefined) request.effectRequest = args;
+  }
   request.args = args;
   if (name === "respond_agent_connection" || name === "update_bot" || isFleetApprovalTool(name))
     request.effectRequest = args;
@@ -357,6 +423,7 @@ const OWN_FIELDS = new Set([
   "artifact_id",
   "use_attached_image",
   "notifyOnFinish",
+  "dailyCheckIns",
   "notify_on_finish",
   "bot_id",
 ]);
@@ -368,7 +435,7 @@ const OWN_FIELDS = new Set([
 async function prepareOwnBotUpdate(
   ctx: RunContext,
   request: ToolRequest,
-): Promise<ToolError | undefined> {
+): Promise<PrepareRefusal | undefined> {
   const { run } = ctx;
   const { executionId, nextApprovedTool } = request;
   if (nextApprovedTool === "update_bot") {
@@ -391,10 +458,10 @@ async function prepareOwnBotUpdate(
           "Only the owner can change your model, thinking, voice or read-aloud, from their own chat.",
       };
     if (!unguarded && (await isRunTainted(ctx)))
-      return {
-        error:
-          "Model, thinking, voice and read-aloud changes are blocked for the rest of this run because it read outside content.",
-      };
+      return refuseOwnerSettingsChange(
+        ctx,
+        "Model, thinking, voice and read-aloud changes are blocked for the rest of this run because it read outside content.",
+      );
   }
   if (!argumentGiven(args.instructions)) return undefined;
   if (isSubagentToolExecution(executionId)) return { error: "Helpers cannot set instructions." };
