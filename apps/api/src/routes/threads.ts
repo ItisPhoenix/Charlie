@@ -21,6 +21,7 @@ import {
   touchGroupUpdatedAt,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { attestAuthenticatedOwnerOrigin } from "../owner-origin.js";
 import type { RouterDeps } from "../router.js";
 import { createRoutineTestRun, routineTestRunNonce, routineTestTarget } from "../routines.js";
 import { withSerializableRetry } from "../serializable-retry.js";
@@ -127,6 +128,7 @@ export function threadsRoutes(ctx: RouterContext) {
       {
         ...deps,
         maxAttachmentsPerMessage: deps.env.maxAttachmentsPerMessage,
+        attestOwnerOrigin: attestAuthenticatedOwnerOrigin,
         imageAdmission: confirmingImages
           ? {
               secrets: deps.secrets,

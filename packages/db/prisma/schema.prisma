@@ -7,6 +7,19 @@ datasource db {
   provider = "postgresql"
 }
 
+model CharlieOwnerOriginProof {
+  id           String   @id @default(cuid())
+  originRunId  String   @unique
+  spaceId      String
+  userId       String
+  payloadB64   String   @db.Text
+  signatureB64 String
+  createdAt    DateTime @default(now())
+
+  @@index([spaceId, userId])
+  @@map("charlie_owner_origin_proofs")
+}
+
 model AiDataConsent {
   userId String
   spaceId String
