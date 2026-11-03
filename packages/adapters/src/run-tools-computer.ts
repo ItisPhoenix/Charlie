@@ -34,6 +34,7 @@ import {
   desktopProtectionGuardMessage,
   protectedComputerLifecycleRefusal,
 } from "./desktop-command-guard.js";
+import { executeGordonHostCommand } from "./gordon-host.js";
 import { nativeShellCommandArgv, usesNativeShell } from "./native-shell.js";
 import { resolvePurchaseCardFill, resolvePurchasePayTokenFill } from "./purchase-service.js";
 import type { RunContext } from "./run-context.js";
@@ -273,6 +274,60 @@ export const computerTools: ToolHandlers = {
     const { deps, run, runId, bot, context } = ctx;
     const { name, args, executionId, observer } = call;
     const command = String(args.command ?? args.cmd ?? "");
+
+    if (
+      process.env.CHARLIE_GORDON_HOST_SOCKET &&
+      bot.id === process.env.CHARLIE_OWNER_GORDON_BOT_ID
+    ) {
+      const effectId = call.applied?.effect.id;
+      if (run.trigger !== "bot_message" || !effectId)
+        return call.finish({
+          error: "An authenticated Chief-to-Gordon delegation is required for Ubuntu host commands.",
+        });
+
+      if (args.cwd)
+        return call.finish({
+          error: "Host commands start in /. Include cd in the command when needed.",
+        });
+
+      try {
+        const result = await executeGordonHostCommand({
+          runId: run.id,
+          effectId,
+          command,
+        });
+
+        const stdout = redactSecrets(result.stdout ?? "", ctx.secrets);
+        const stderr = redactSecrets(result.stderr ?? "", ctx.secrets);
+
+        await appendComputerCommand(ctx, {
+          executionId,
+          kind: "shell",
+          command: redactSecrets(command, ctx.secrets),
+          cwd: "/",
+          status: "done",
+          exitCode: result.exit_code ?? (result.ok ? 0 : 1),
+          output: (stdout + stderr).slice(-COMPUTER_COMMAND_OUTPUT_MAX_CHARS),
+        });
+
+        return call.finish(
+          result.error
+            ? { error: result.error }
+            : {
+                stdout,
+                stderr,
+                code: result.exit_code,
+                status: result.status,
+                environment: "real-ubuntu-host",
+              },
+        );
+      } catch {
+        return call.finish({
+          error: "Ubuntu host execution or authorization failed",
+        });
+      }
+    }
+
     const refusal = protectedComputerLifecycleRefusal(command);
     if (ctx.computer.graphical && refusal) {
       return call.finish({ error: desktopProtectionGuardMessage(refusal) });

@@ -305,7 +305,17 @@ export async function gateToolCall(
             ),
           )
         : false));
-  const plan = USER_COMPUTER_TOOLS.has(name)
+  // Host root authorization remains independently enforced by the API
+  // and by the host's signed-grant verifier and durable effect ledger.
+  const gordonOwnerHost =
+    name === "shell" &&
+    run.trigger === "bot_message" &&
+    ctx.bot.id === process.env.CHARLIE_OWNER_GORDON_BOT_ID &&
+    Boolean(process.env.CHARLIE_GORDON_HOST_SOCKET);
+
+  const plan = gordonOwnerHost && approvalResolved.decision !== "deny"
+    ? "allow"
+    : USER_COMPUTER_TOOLS.has(name)
     ? await userComputerGate(ctx, approvalResolved.decision === "deny", name, args)
     : planActionGate({
         resolved: approvalResolved,
