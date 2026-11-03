@@ -9,6 +9,7 @@ import socketserver
 import sqlite3
 import time
 from pathlib import Path
+from owner_verify import verify as verify_owner_grant
 
 SOCKET = "/run/charlie-host/bridge.sock"
 KEY = "/etc/charlie-host/bridge.key"
@@ -88,6 +89,29 @@ class Handler(socketserver.StreamRequestHandler):
 
             if not claim_nonce(nonce, issued):
                 self.send({"ok": False, "error": "replay_detected"})
+                return
+
+            if request.get("action") == "validate_grant":
+                command = request.get("command")
+                if not isinstance(command, str) or not 0 < len(
+                    command.encode("utf-8")
+                ) <= 8192:
+                    self.send({"ok": False, "error": "invalid_command"})
+                    return
+                try:
+                    grant = verify_owner_grant(request.get("grant"))
+                except Exception:
+                    self.send({"ok": False, "error": "invalid_authorization"})
+                    return
+                digest = hashlib.sha256(command.encode("utf-8")).hexdigest()
+                if not hmac.compare_digest(digest, grant["command_sha256"]):
+                    self.send({"ok": False, "error": "command_mismatch"})
+                    return
+                self.send({
+                    "ok": True,
+                    "grant_verified": True,
+                    "execution_enabled": False
+                })
                 return
 
             if request.get("action") != "ping":
