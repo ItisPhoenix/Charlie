@@ -207,8 +207,13 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           if (evidence.length >= 40) {
             next[position] = { ...progress, state: "submitted", evidence,
               delegatedRunId: child.id };
-            changed = true;
+          } else {
+            // A completed run without usable evidence cannot silently hold the mission.
+            next[position] = { ...progress, state: "blocked",
+              evidence: "Completed executor run did not supply sufficient evidence.",
+              delegatedRunId: child.id };
           }
+          changed = true;
         } else if (child.status === "running" || child.status === "leased") {
           if (progress.state !== "running") {
             next[position] = { ...progress, state: "running" };
@@ -261,8 +266,13 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
             next[position] = { ...currentReview,
               state: match[1] === "MISSION_REVIEW_PASS" ? "verified" : "blocked",
               verifierRunId: review.id, reviewEvidence: report };
-            changed = true;
+          } else {
+            // Completed but malformed reviews fail closed; do not wait forever.
+            next[position] = { ...currentReview, state: "blocked",
+              verifierRunId: review.id,
+              reviewEvidence: report || "Review completed without a usable evidence report." };
           }
+          changed = true;
         } else if (["failed", "cancelled"].includes(review.status)) {
           next[position] = { ...currentReview, state: "blocked" };
           changed = true;
@@ -322,12 +332,24 @@ export function createCharlieMissionReconciler(deps: {
   jobs: JobPublisher;
   now?: () => Date;
 }): () => Promise<void> {
+  // Rotating keyset cursor prevents the same oldest 20 missions from starving
+  // newer work; a mission remains eligible regardless of its age.
+  let cursor = "";
   return async () => {
     const rows = await deps.prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      'SELECT "id" FROM "charlie_missions" WHERE "updatedAt" > NOW() - INTERVAL \'7 days\' ' +
-        'ORDER BY "updatedAt" ASC LIMIT $1',
-      MAX_MISSIONS_PER_SWEEP,
+      'SELECT "id" FROM "charlie_missions" WHERE "id" > $1 ' +
+        'ORDER BY "id" ASC LIMIT $2',
+      cursor, MAX_MISSIONS_PER_SWEEP,
     );
+    if (rows.length < MAX_MISSIONS_PER_SWEEP && cursor) {
+      const wrap = await deps.prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        'SELECT "id" FROM "charlie_missions" WHERE "id" <= $1 ' +
+          'ORDER BY "id" ASC LIMIT $2',
+        cursor, MAX_MISSIONS_PER_SWEEP - rows.length,
+      );
+      rows.push(...wrap);
+    }
+    if (rows.length > 0) cursor = rows[rows.length - 1]!.id;
     for (const { id } of rows) {
       try {
         const queued = await advanceMission(deps.prisma, id, deps.now?.() ?? new Date());
