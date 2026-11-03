@@ -25,6 +25,8 @@ type MissionRow = {
   spaceId: string;
   userId: string;
   chiefBotId: string;
+  creationKey: string;
+  originRunId: string | null;
   plan: CharlieMissionPlan;
   progress: Progress[];
   revision: number;
@@ -143,19 +145,26 @@ export async function missionCreate(
   }
   // Never update or return a different tenant's row on a creation-key conflict.
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
-    'INSERT INTO "charlie_missions" ("id","spaceId","userId","chiefBotId","creationKey","plan") ' +
-      'VALUES ($1,$2,$3,$4,$5,$6::jsonb) ' +
-      'ON CONFLICT ("creationKey") DO NOTHING RETURNING *',
+    'INSERT INTO "charlie_missions" ("id","spaceId","userId","chiefBotId","creationKey","originRunId","plan") ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ' +
+      'ON CONFLICT DO NOTHING RETURNING *',
     randomUUID(), ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
-    creationKey, JSON.stringify(plan),
+    creationKey, ctx.run.id, JSON.stringify(plan),
   );
   const [existing] = rows.length ? rows : await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
-    'SELECT * FROM "charlie_missions" WHERE "creationKey"=$1 ' +
-      'AND "spaceId"=$2 AND "userId"=$3 AND "chiefBotId"=$4 LIMIT 1',
-    creationKey, ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
+    'SELECT * FROM "charlie_missions" WHERE "spaceId"=$1 AND "userId"=$2 ' +
+      'AND "chiefBotId"=$3 AND ("creationKey"=$4 OR "originRunId"=$5) ' +
+      'ORDER BY CASE WHEN "originRunId"=$5 THEN 0 ELSE 1 END LIMIT 1',
+    ctx.run.spaceId, ctx.run.userId, ctx.bot.id, creationKey, ctx.run.id,
   );
   if (!existing) return { error: "Mission creation key belongs to another scope." };
   const mission = parseRow(existing);
+  // Repeated model calls during a single owner turn reuse the original mission,
+  // irrespective of their distinct tool call/effect identities.
+  if (mission.originRunId === ctx.run.id && mission.creationKey !== creationKey) {
+    return { ok: true, reused: true, ...rowView(mission),
+      note: "Mission already exists for this owner request; continue it." };
+  }
   if (canonicalJson(mission.plan) !== canonicalJson(plan)) {
     return { error: "Mission creation key cannot be reused for a different plan." };
   }
