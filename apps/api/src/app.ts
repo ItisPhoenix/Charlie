@@ -377,6 +377,17 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
         prisma,
       ),
       runs!,
+      async (runId: string) => {
+        const gordonId = process.env.CHARLIE_OWNER_GORDON_BOT_ID;
+        if (!gordonId) return false;
+
+        const target = await prisma.run.findUnique({
+          where: { id: runId },
+          select: { botId: true },
+        });
+
+        return target?.botId === gordonId;
+      },
     );
   const ticketChanges = createTicketChangeNotifier({
     boardEvents,

@@ -139,6 +139,7 @@ export class RunJobPublisher implements JobPublisher {
     private readonly prisma: PrismaClient,
     private readonly background: JobPublisher,
     private readonly starter: RunStarter,
+    private readonly workerOnly?: (runId: string) => Promise<boolean>,
   ) {}
 
   async enqueue(job: BackgroundJob): Promise<void> {
@@ -151,6 +152,12 @@ export class RunJobPublisher implements JobPublisher {
       },
       data: { wakeAt: job.availableAt ?? new Date() },
     });
+    // Selected runs must execute in the dedicated worker, never
+    // in the API process that accepted the chat message.
+    if (await this.workerOnly?.(job.payload.runId)) {
+      await this.background.enqueue(job);
+      return;
+    }
     this.starter.start(job.payload.runId, job.availableAt);
   }
 
