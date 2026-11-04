@@ -15,7 +15,7 @@ import { filterBuiltinToolsForRun, filterBuiltinToolsForThread } from "./schedul
 // verification at the offered-tool boundary, not merely by telling the model.
 // No credentials, shell, modifications, delegation, or host authority.
 export const MISSION_REVIEW_TOOLS: ReadonlySet<string> = new Set([
-  "web_search", "web_fetch", "browser_snapshot",
+  "web_search", "web_fetch", "github_source_list", "github_source_read", "browser_snapshot",
   "list_files", "read_file", "search_history", "read_history",
   "recall_memory", "mission_status", "computer_observe",
 ]);
@@ -40,6 +40,8 @@ export const READ_ONLY_AGENT_TOOLS = new Set([
   "skill_read",
   "web_search",
   "web_fetch",
+  "github_source_list",
+  "github_source_read",
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",

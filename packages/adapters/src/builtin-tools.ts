@@ -768,6 +768,37 @@ export const builtinAgentTools: ConnectorTool[] = [
     readOnly: true,
   },
   {
+    name: "github_source_list",
+    description: "List actual files and subdirectories of a PUBLIC GitHub repository at an exact pinned commit. Use instead of GitHub code search or the giant recursive tree API. Start with path empty for repository root, then narrow to packages/adapters/src or the relevant directory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: { type: "string", description: "owner/repo, e.g. ItisPhoenix/Charlie" },
+        commit: { type: "string", description: "Exact 40-character commit SHA" },
+        path: { type: "string", description: "Directory path relative to repository root; omit for root" },
+        filter: { type: "string", description: "Optional filename/path substring filter" },
+      },
+      required: ["repository", "commit"],
+    },
+    readOnly: true,
+  },
+  {
+    name: "github_source_read",
+    description: "Read a PUBLIC GitHub source file at an exact pinned commit, with immutable SHA and numbered lines. Does not need a GitHub login or web search. Use github_source_list to find the file; read more using startLine and lineCount.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: { type: "string", description: "owner/repo" },
+        commit: { type: "string", description: "Exact 40-character commit SHA" },
+        path: { type: "string", description: "File path from github_source_list" },
+        startLine: { type: "integer", minimum: 1, description: "First line to show (default 1)" },
+        lineCount: { type: "integer", minimum: 1, maximum: 200, description: "Lines to show (default 120)" },
+      },
+      required: ["repository", "commit", "path"],
+    },
+    readOnly: true,
+  },
+  {
     name: "web_fetch",
     description:
       "Fetch a public http(s) page and return readable text (title + content). Read-only; no JavaScript. Use after web_search when you need the page itself.",
