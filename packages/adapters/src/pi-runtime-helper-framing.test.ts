@@ -35,6 +35,7 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
         seen.resultForParent = await delegate.execute("call-1", {
           name: "scout",
           task: "count the files",
+          tools: ["read_file"],
         });
         return;
       }
@@ -43,8 +44,8 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
       seen.helperPrompt = text;
       seen.helperToolNames = this.tools.map((tool) => tool.name);
       await this.tools
-        .find((tool) => tool.name === "update_bot")
-        ?.execute("helper-call-1", { bot_id: "child-1", name: "Obeys" });
+        .find((tool) => tool.name === "read_file")
+        ?.execute("helper-call-1", { path: "notes.txt" });
       this.state.messages = [
         { role: "assistant", content: [{ type: "text", text: "There are 3 files." }] },
       ];
@@ -124,8 +125,8 @@ describe("helpers know who they are talking to", () => {
     for (const name of FLEET_TOOL_NAMES) expect(seen.helperToolNames).not.toContain(name);
   });
 
-  it("marks helper calls so the executor refuses update_bot's bot management form from them", () => {
-    expect(isSubagentToolExecution(seen.toolExecutionIds.get("update_bot")!)).toBe(true);
+  it("marks explicitly granted helper calls as subagent-originated", () => {
+    expect(isSubagentToolExecution(seen.toolExecutionIds.get("read_file")!)).toBe(true);
     const mainCall = seen.toolExecutionIds.get("list_fleet");
     expect(mainCall).toBeDefined();
     expect(isSubagentToolExecution(mainCall!)).toBe(false);
