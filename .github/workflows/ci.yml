@@ -13,7 +13,7 @@ permissions:
 # request already ran the rest against the then-current main, and the nightly run refreshes the
 # E2E screenshot baseline.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  group: ci-${{ github.event.pull_request.number || github.run_id }}-${{ github.workflow_sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Testcontainers pulls Docker Hub images through Google's public mirror: anonymous Docker Hub pulls
