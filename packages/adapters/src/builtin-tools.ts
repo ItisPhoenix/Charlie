@@ -1531,6 +1531,12 @@ export const builtinAgentTools: ConnectorTool[] = [
           description: "Short label shown in the thread, e.g. scout or reviewer.",
         },
         task: { type: "string", description: "The work the helper should complete." },
+        tools: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 12,
+          description: "Exact tools this helper needs from your available tools. Omit for a tool-free helper. Never grant unnecessary tools.",
+        },
         instructions: {
           type: "string",
           description: "Optional extra system instructions for the helper.",
