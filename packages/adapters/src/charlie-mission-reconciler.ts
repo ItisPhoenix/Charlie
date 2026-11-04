@@ -32,7 +32,15 @@ type Tx = Prisma.TransactionClient;
 const TASK_TRIGGER = "charlie_mission";
 const REVIEW_TRIGGER = "charlie_mission_review";
 const MAX_MISSIONS_PER_SWEEP = 20;
-const OUTCOME_LIMIT = 4000;
+// Evidence must be long enough for citations and crash-point assertions.
+// Never silently treat a truncated report as complete evidence.
+const OUTCOME_LIMIT = 16000;
+function boundedOutcome(value: string): string {
+  const output = value.trim();
+  if (output.length <= OUTCOME_LIMIT) return output;
+  return output.slice(0, OUTCOME_LIMIT) +
+    "\n[EVIDENCE_TRUNCATED: original output exceeded the mission evidence budget; final report incomplete]";
+}
 
 function decode(row: MissionRow): MissionRow {
   const plan = typeof row.plan === "string" ? JSON.parse(row.plan) : row.plan;
@@ -143,7 +151,7 @@ async function finalOutput(tx: Tx, runId: string, botId: string, coordinatorId: 
       const item = block as Record<string, unknown>;
       if (item.kind === "bot_message_sent" && item.toBotId === coordinatorId &&
           item.intent === "result" && typeof item.text === "string" && item.text.trim()) {
-        return item.text.trim().slice(0, OUTCOME_LIMIT);
+        return boundedOutcome(item.text);
       }
     }
   }
@@ -156,7 +164,7 @@ async function finalOutput(tx: Tx, runId: string, botId: string, coordinatorId: 
         ? [item.text.trim()]
         : [];
     }).join("\n");
-    if (text) return text.slice(0, OUTCOME_LIMIT);
+    if (text) return boundedOutcome(text);
   }
   return "";
 }
@@ -276,6 +284,8 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
             "Evaluate the execution outcome. Do not repeat the specialist's research,",
             "commands or automation. Do not execute tools or expand permissions.",
             "Choose ACCEPT only if concrete evidence supports the criteria at this risk level.",
+            "If the supplied evidence contains EVIDENCE_TRUNCATED, it is incomplete;",
+            "do not accept it as a complete mission deliverable.",
             "Choose RETRY for a recoverable evidence or execution gap.",
             "Choose ESCALATE when independent specialist corroboration is justified.",
             "Choose BLOCK if the outcome is unsafe or unsupported.",
@@ -405,7 +415,11 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           "Verification criteria: " + spec.verificationCriteria,
           "Use your ordinary tools and existing permission gates.",
           "You have NO owner-originated host-root grant. Request the owner if privileged work is needed.",
-          "Produce concrete evidence and blockers in your final answer.",
+          "Produce one complete final evidence report under 12000 characters.",
+          "Include all required verification scenarios and expected assertions, any citations,",
+          "and clearly distinguish general references from Charlie-specific host observations.",
+          "Do not send incremental progress messages to the owner or coordinator;",
+          "return the complete result once, with specific blockers if incomplete.",
           dependency.context,
         ].filter(Boolean).join("\n");
         const runId = await queueAgent(
