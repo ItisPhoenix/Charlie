@@ -1115,7 +1115,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Charlie executive: turn an ordinary owner request into the smallest useful mission using relevant specialists. Avoid unnecessary reviewers and invented dependencies. Choose completionPolicy=report for informational deliverables, or completionPolicy=review for consequential actions and assessed outcomes. Report delivery is not factual verification. Keep existing approval, effect and recovery protections. Persist the plan, then dispatch once.",
+    description: "Create and dispatch an executive mission. For EVERY work item select completionPolicy=report when the requested outcome is an informational deliverable (read-only source analysis, explanation, research, comparisons, or identifying evidence/limitations), even if the owner uses words like inspect, verify, or check. This reports completion of the deliverable, not independent factual verification. Select completionPolicy=review when consequential external actions occur or independent outcome assessment is requested. No redundant AI reviews for informational reports. Preserve all permissions and effect gates.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1133,10 +1133,10 @@ export const builtinAgentTools: ConnectorTool[] = [
               verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
               dependsOn: { type: "array", items: { type: "string" } },
               verificationCriteria: { type: "string", maxLength: 2000, description: "Describe the result required and evidence expected; distinguish delivery from executed outcomes." },
-              completionPolicy: { type: "string", enum: ["report", "review"], description: "report: informational deliverable with no mandatory second model assessment. review: consequential actions or assessed evidence. Omission defaults to review." },
+              completionPolicy: { type: "string", enum: ["report", "review"], description: "Required for each task. report for read-only informational findings, including researched or source-supported reports. review for modifying/consequential actions or independently assessed outcomes. Delivery is not factual verification." },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
             },
-            required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","maxAttempts"],
+            required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","completionPolicy","maxAttempts"],
           },
         },
       },
