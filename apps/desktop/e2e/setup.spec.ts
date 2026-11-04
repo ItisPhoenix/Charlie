@@ -846,9 +846,13 @@ for (const failure of ["load", "save"] as const) {
         await expect.poll(() => monitoringRequests).toBeGreaterThan(connectedRequests);
       // A cookie event on the original session must still refresh that server's identity.
       const beforeCookie = monitoringRequests;
-      await previous.evaluate(() => {
-        document.cookie = `monitoring-test=${Date.now()}; path=/`;
-      });
+      await previous.context().addCookies([
+        {
+          name: "monitoring-test",
+          value: String(Date.now()),
+          url: previous.url(),
+        },
+      ]);
       await expect.poll(() => monitoringRequests).toBeGreaterThan(beforeCookie);
     } finally {
       await app?.close();
