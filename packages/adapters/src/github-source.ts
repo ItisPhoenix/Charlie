@@ -7,15 +7,18 @@ import { fetchSafeWebText } from "./web-ssrf.js";
  * The shared safe HTTP transport validates public DNS addresses at each hop.
  */
 function target(args: Record<string, unknown>) {
-  const repository = String(args.repository ?? "").trim();
-  const commit = String(args.commit ?? "").trim();
+  const repository = String(args.repository ??
+    process.env.CHARLIE_SOURCE_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? "").trim();
+  const commit = String(args.commit ??
+    (repository === process.env.CHARLIE_SOURCE_REPOSITORY ? process.env.GIT_SHA : "") ??
+    "").trim();
   const path = String(args.path ?? "").trim().replace(/\/$/, "");
   const [owner, name, extra] = repository.split("/");
   const validPart = (part: string | undefined) =>
     !!part && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(part) && !part.includes("..");
   if (!validPart(owner) || !validPart(name) || extra ||
-      !/^[a-fA-F0-9]{40}$/.test(commit)) {
-    throw new Error("repository must be owner/repo and commit must be the exact 40-character SHA");
+      (commit !== "" && !/^[a-fA-F0-9]{40}$/.test(commit))) {
+    throw new Error("Repository source is not configured or source ref invalid.");
   }
   if (path.length > 400 || path.startsWith("/") ||
       path.split("/").some((part) => !part || part === "." ||
@@ -26,11 +29,30 @@ function target(args: Record<string, unknown>) {
   return { repository, owner, name, commit, path, sourcePath };
 }
 
+async function resolveTarget(ctx: AdapterContext, args: Record<string, unknown>) {
+  const t = target(args);
+  if (t.commit) return t;
+  // Resolve a public repository's current default head to one immutable SHA.
+  // The resolved SHA accompanies every response for subsequent source reads.
+  const res = await fetchSafeWebText(
+    "https://api.github.com/repos/" + t.owner + "/" + t.name + "/commits?per_page=1",
+    { signal: ctx.signal, timeoutMs: 12000, maxBytes: 128 * 1024,
+      headers: { Accept: "application/vnd.github+json" } },
+  );
+  const history: unknown = JSON.parse(res.body);
+  if (!Array.isArray(history) || !history[0] || typeof history[0] !== "object")
+    throw new Error("Could not resolve source revision");
+  const commit = (history[0] as { sha?: unknown }).sha;
+  if (typeof commit !== "string" || !/^[a-fA-F0-9]{40}$/.test(commit))
+    throw new Error("Source revision is missing");
+  return { ...t, commit };
+}
+
 export async function githubSourceList(
   ctx: AdapterContext, args: Record<string, unknown>,
 ) {
   try {
-    const t = target(args);
+    const t = await resolveTarget(ctx, args);
     const url = "https://api.github.com/repos/" + t.owner + "/" + t.name +
       "/contents" + (t.sourcePath ? "/" + t.sourcePath : "") +
       "?ref=" + t.commit;
@@ -62,7 +84,7 @@ export async function githubSourceRead(
   ctx: AdapterContext, args: Record<string, unknown>,
 ) {
   try {
-    const t = target(args);
+    const t = await resolveTarget(ctx, args);
     if (!t.path) return { error: "A file path is required" };
     const url = "https://raw.githubusercontent.com/" + t.owner + "/" +
       t.name + "/" + t.commit + "/" + t.sourcePath;

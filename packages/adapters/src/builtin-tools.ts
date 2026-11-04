@@ -769,32 +769,32 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "github_source_list",
-    description: "List actual files and subdirectories of a PUBLIC GitHub repository at an exact pinned commit. Use instead of GitHub code search or the giant recursive tree API. Start with path empty for repository root, then narrow to packages/adapters/src or the relevant directory.",
+    description: "Read-only source directory listing for a public GitHub repository. Repository defaults to configured deployment source, and revision defaults to its deployed SHA or the remote HEAD. Use returned paths and revision for subsequent reads.",
     inputSchema: {
       type: "object",
       properties: {
-        repository: { type: "string", description: "owner/repo, e.g. ItisPhoenix/Charlie" },
-        commit: { type: "string", description: "Exact 40-character commit SHA" },
+        repository: { type: "string", description: "Optional owner/repo; defaults to configured source repository." },
+        commit: { type: "string", description: "Optional exact revision; resolves automatically when omitted." },
         path: { type: "string", description: "Directory path relative to repository root; omit for root" },
         filter: { type: "string", description: "Optional filename/path substring filter" },
       },
-      required: ["repository", "commit"],
+      required: [],
     },
     readOnly: true,
   },
   {
     name: "github_source_read",
-    description: "Read a PUBLIC GitHub source file at an exact pinned commit, with immutable SHA and numbered lines. Does not need a GitHub login or web search. Use github_source_list to find the file; read more using startLine and lineCount.",
+    description: "Read a public GitHub file with numbered lines. Repository/revision default to configured source. Exact known file paths can be read directly without listing. The response reports the immutable source revision.",
     inputSchema: {
       type: "object",
       properties: {
-        repository: { type: "string", description: "owner/repo" },
-        commit: { type: "string", description: "Exact 40-character commit SHA" },
+        repository: { type: "string", description: "Optional owner/repo; defaults to configured source repository." },
+        commit: { type: "string", description: "Optional exact revision; resolves automatically when omitted." },
         path: { type: "string", description: "File path from github_source_list" },
         startLine: { type: "integer", minimum: 1, description: "First line to show (default 1)" },
         lineCount: { type: "integer", minimum: 1, maximum: 200, description: "Lines to show (default 120)" },
       },
-      required: ["repository", "commit", "path"],
+      required: ["path"],
     },
     readOnly: true,
   },
@@ -1097,7 +1097,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Charlie executive: turn a normal-language owner goal into the SMALLEST useful bounded mission; use only relevant specialists, avoid invented reviewer roles and unnecessary dependent stages. Persist the mission then call mission_dispatch once. Read-only informational work may finish by delivering the specialist's report without a mandatory second AI assessment. For actions, consequential changes, ambiguous claims, failures, or explicitly requested independent checks, retain stronger evidence and safety requirements. Never claim a report was independently verified when it was only delivered.",
+    description: "Charlie executive: turn an ordinary owner request into the smallest useful mission using relevant specialists. Avoid unnecessary reviewers and invented dependencies. Choose completionPolicy=report for informational deliverables, or completionPolicy=review for consequential actions and assessed outcomes. Report delivery is not factual verification. Keep existing approval, effect and recovery protections. Persist the plan, then dispatch once.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1114,7 +1114,8 @@ export const builtinAgentTools: ConnectorTool[] = [
               assigneeBotId: { type: "string" },
               verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
               dependsOn: { type: "array", items: { type: "string" } },
-              verificationCriteria: { type: "string", maxLength: 2000, description: "Specify observable acceptance evidence and its epistemic level (read-only cited source analysis versus an actually executed live test). Never require runtime execution when the owner asked for source-only review." },
+              verificationCriteria: { type: "string", maxLength: 2000, description: "Describe the result required and evidence expected; distinguish delivery from executed outcomes." },
+              completionPolicy: { type: "string", enum: ["report", "review"], description: "report: informational deliverable with no mandatory second model assessment. review: consequential actions or assessed evidence. Omission defaults to review." },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
             },
             required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","maxAttempts"],

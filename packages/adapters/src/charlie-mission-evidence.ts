@@ -41,13 +41,15 @@ export function verifiedDependencyContext(
     // Informational tasks may unlock another informational task when their
     // real completed run delivered a bounded report. This is not a claim of
     // independent factual corroboration; preserve that distinction downstream.
-    const readOnlyDelivered = entry?.completionBasis === "read_only_delivery";
-    if (entry?.state !== "verified" ||
-        !entry.delegatedRunId || !entry.evidence?.trim() ||
-        (!chiefAccepted && !independentlyAccepted && !readOnlyDelivered)) {
+    const reportDelivered = item.completionPolicy === "report" &&
+      (entry?.state === "delivered" ||
+        (entry?.state === "verified" && entry.completionBasis === "read_only_delivery"));
+    if (!entry?.delegatedRunId || !entry.evidence?.trim() ||
+        (!(entry.state === "verified" && (chiefAccepted || independentlyAccepted)) &&
+          !reportDelivered)) {
       return { ok: false, error: "Missing accepted, attributable evidence for dependency: " + key };
     }
-    if (readOnlyDelivered && !chiefAccepted && !independentlyAccepted) {
+    if (reportDelivered && !chiefAccepted && !independentlyAccepted) {
       blocks.push("Dependency " + key + ": a read-only report was delivered; its factual claims were not independently verified.");
     }
     blocks.push(

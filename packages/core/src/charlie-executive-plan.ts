@@ -10,6 +10,7 @@ export type CharlieWorkState =
   | "submitted"
   | "verifying"
   | "verified"
+  | "delivered"
   | "blocked"
   | "failed"
   | "cancelled";
@@ -22,6 +23,8 @@ export type CharlieWorkSpec = {
   verifierBotId?: string;
   dependsOn: readonly string[];
   verificationCriteria: string;
+  /** A report confirms delivery; review requires assessed evidence. */
+  completionPolicy?: "report" | "review";
   maxAttempts: number;
 };
 
@@ -43,6 +46,7 @@ export type CharlieMissionDecision = {
     "completed" | "blocked" | "failed";
   ready: string[];
   verified: number;
+  delivered: number;
   total: number;
   active: number;
 };
@@ -88,6 +92,8 @@ export function validateCharlieMissionPlan(
         !validText(item.title, 200) ||
         !validText(item.assigneeBotId, 128) ||
         !validText(item.verificationCriteria, 2000) ||
+        (item.completionPolicy !== undefined &&
+          item.completionPolicy !== "report" && item.completionPolicy !== "review") ||
         (item.verifierBotId !== undefined &&
           (!validText(item.verifierBotId, 128) ||
             item.verifierBotId === item.assigneeBotId)) ||
@@ -137,12 +143,12 @@ export function validateCharlieMissionPlan(
 
 const WORK_STATES = new Set<CharlieWorkState>([
   "planned", "queued", "running", "submitted", "verifying",
-  "verified", "blocked", "failed", "cancelled",
+  "verified", "delivered", "blocked", "failed", "cancelled",
 ]);
 
 /**
- * Verified evidence, not a model's completion claim,
- * unlocks downstream tasks.
+ * Assessed work unlocks any downstream stage. A delivered report may unlock
+ * another informational report without being falsely labelled verified.
  */
 export function decideCharlieMissionWork(
   plan: CharlieMissionPlan,
@@ -173,6 +179,9 @@ export function decideCharlieMissionWork(
   const verified = plan.work.filter((item) =>
     stateOf(item.key) === "verified",
   ).length;
+  const delivered = plan.work.filter((item) =>
+    stateOf(item.key) === "delivered",
+  ).length;
 
   const failed = plan.work.some((item) =>
     stateOf(item.key) === "failed" ||
@@ -198,7 +207,8 @@ export function decideCharlieMissionWork(
     : plan.work.filter((item) =>
         stateOf(item.key) === "planned" &&
         item.dependsOn.every((dependency) =>
-          stateOf(dependency) === "verified",
+          stateOf(dependency) === "verified" ||
+          (item.completionPolicy === "report" && stateOf(dependency) === "delivered"),
         ) &&
         (states.get(item.key)?.attempts ?? 0) < item.maxAttempts,
       ).slice(0, capacity).map((item) => item.key);
@@ -209,7 +219,7 @@ export function decideCharlieMissionWork(
   );
 
   const state: CharlieMissionDecision["state"] =
-    verified === plan.work.length ? "completed" :
+    verified + delivered === plan.work.length ? "completed" :
     failed || exhausted ? "failed" :
     blocked || (active === 0 && ready.length === 0 && !submitted)
       ? "blocked" :
@@ -221,6 +231,7 @@ export function decideCharlieMissionWork(
     state,
     ready,
     verified,
+    delivered,
     total: plan.work.length,
     active,
   };
