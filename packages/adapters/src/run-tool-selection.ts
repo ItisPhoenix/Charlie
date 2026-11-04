@@ -11,6 +11,15 @@ import { filterImageReturningComputerTools } from "./model-vision.js";
 import { USER_COMPUTER_SCREEN_TOOLS } from "./run-tools-user-computer.js";
 import { filterBuiltinToolsForRun, filterBuiltinToolsForThread } from "./schedule-tools.js";
 
+// Mission assessments consume untrusted specialist reports. Enforce read-only
+// verification at the offered-tool boundary, not merely by telling the model.
+// No credentials, shell, modifications, delegation, or host authority.
+const MISSION_REVIEW_TOOLS = new Set([
+  "web_search", "web_fetch", "browser_snapshot",
+  "list_files", "read_file", "search_history", "read_history",
+  "recall_memory", "mission_status", "computer_observe",
+]);
+
 export const READ_ONLY_AGENT_TOOLS = new Set([
   "computer_observe",
   "list_files",
@@ -105,6 +114,7 @@ export function selectBuiltinToolsForRun(options: {
   ).filter(
     (tool) =>
       !disabled.has(tool.name) &&
+      (options.trigger !== "charlie_mission_review" || MISSION_REVIEW_TOOLS.has(tool.name)) &&
       (options.trigger !== "created" || CREATED_RUN_TOOL_NAMES.has(tool.name)) &&
       (!FLEET_TOOL_NAMES_SET.has(tool.name) ||
         (Boolean(options.fleetManagement) && ownerStartedRun)) &&
