@@ -36,8 +36,8 @@ const MAX_MISSIONS_PER_SWEEP = 20;
 // Evidence must be long enough for citations and crash-point assertions.
 // Never silently treat a truncated report as complete evidence.
 const OUTCOME_LIMIT = 16000;
-type TerminalNotice = { threadId: string; eventSeq: number };
-type AdvanceResult = { scheduled: string[]; notice?: TerminalNotice };
+type MissionNotice = { threadId: string; eventSeq: number };
+type AdvanceResult = { scheduled: string[]; notices: MissionNotice[] };
 const TERMINAL_MISSION_STATES = new Set(["completed", "blocked", "failed"]);
 
 function missionSummary(row: MissionRow, progress: Progress[]): string {
@@ -243,22 +243,72 @@ async function queueAgent(
   return run.id;
 }
 
+/**
+ * Real mission delegation/completion is shown as a compact collaboration
+ * marker, not a model-authored chat bubble or a second bot_message run.
+ * Receipt and event commit with the mission transition; nonce is unique
+ * for each work/attempt/direction under the Chief's own thread.
+ */
+async function missionPeerReceipt(
+  tx: Tx,
+  row: MissionRow,
+  spec: { key: string; assigneeBotId: string },
+  attempt: number,
+  direction: "sent" | "received",
+): Promise<MissionNotice | undefined> {
+  const chief = await tx.bot.findFirst({
+    where: { id: row.chiefBotId, userId: row.userId,
+      spaceId: row.spaceId, archivedAt: null },
+    select: { thread: { select: { id: true } } },
+  });
+  const peer = await tx.bot.findFirst({
+    where: { id: spec.assigneeBotId, userId: row.userId,
+      spaceId: row.spaceId },
+    select: { name: true },
+  });
+  if (!chief?.thread || !peer) return undefined;
+  const threadId = chief.thread.id;
+  const blocks = direction === "sent"
+    ? [{ kind: "bot_message_sent" as const,
+      toBotId: spec.assigneeBotId, toBotName: peer.name,
+      text: "Delegated Charlie mission " + row.id + " / " + spec.key +
+        " (attempt " + attempt + "). Full task and provenance are in the mission ledger.",
+      intent: "request" as const }]
+    : [{ kind: "bot_message_received" as const,
+      fromBotId: spec.assigneeBotId, fromBotName: peer.name,
+      text: "Completed delegated mission " + row.id + " / " + spec.key +
+        " (attempt " + attempt + "); evidence queued for Chief assessment.",
+      intent: "result" as const }];
+  const nonce = "charlie:mission:peer:" + row.id + ":" +
+    spec.key + ":" + attempt + ":" + direction;
+  const message = await createThreadMessageInTransaction(tx, {
+    threadId, role: "bot", botId: row.chiefBotId,
+    blocks, markUnread: false, clientNonce: nonce,
+  });
+  const event = await appendEventInTransaction(tx, {
+    spaceId: row.spaceId, threadId, botId: row.chiefBotId,
+    type: "thread.message.created",
+    payload: { messageId: message.id, role: "bot", blocks },
+  });
+  return { threadId, eventSeq: event.seq };
+}
+
 async function advanceMission(prisma: PrismaClient, id: string, now: Date): Promise<AdvanceResult> {
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRawUnsafe<MissionRow[]>(
       'SELECT * FROM "charlie_missions" WHERE "id"=$1 FOR UPDATE', id,
     );
-    if (!rows.length) return { scheduled: [] };
+    if (!rows.length) return { scheduled: [], notices: [] };
     const row = decode(rows[0]!);
     // Do not auto-start newly created plans before the original authenticated
     // owner-originated run has explicitly dispatched their first stage.
-    if (!row.progress.length) return { scheduled: [] };
+    if (!row.progress.length) return { scheduled: [], notices: [] };
     const deadlineExpired =
       now.getTime() >= row.createdAt.getTime() + row.plan.maxRuntimeSeconds * 1000;
     const next: Progress[] = [...row.progress];
     const scheduled: string[] = [];
     let changed = false;
-    let notice: TerminalNotice | undefined;
+    const notices: MissionNotice[] = [];
 
     for (const spec of row.plan.work) {
       const position = next.findIndex((item) => item.key === spec.key);
@@ -268,6 +318,10 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
         const child = await findChild(tx, row, spec.key, spec.assigneeBotId, progress.attempts);
         if (!child) continue;
         if (child.status === "completed") {
+          const peerNotice = await missionPeerReceipt(
+            tx, row, spec, progress.attempts, "received",
+          );
+          if (peerNotice) notices.push(peerNotice);
           const evidence = await finalOutput(tx, child.id, spec.assigneeBotId, row.chiefBotId);
           if (evidence.length >= 40) {
             next[position] = { ...progress, state: "submitted", evidence,
@@ -461,6 +515,10 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
         if (idx >= 0) next[idx] = entry;
         else next.push(entry);
         scheduled.push(runId);
+        const peerNotice = await missionPeerReceipt(
+          tx, row, spec, attempt, "sent",
+        );
+        if (peerNotice) notices.push(peerNotice);
         changed = true;
       }
     }
@@ -492,11 +550,11 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
             type: "thread.message.created",
             payload: { messageId: message.id, role: "bot", blocks },
           });
-          notice = { threadId, eventSeq: event.seq };
+          notices.push({ threadId, eventSeq: event.seq });
         }
       }
     }
-    return { scheduled, ...(notice ? { notice } : {}) };
+    return { scheduled, notices };
   }, { timeout: 20000 });
 }
 
@@ -531,9 +589,9 @@ export function createCharlieMissionReconciler(deps: {
     for (const { id } of rows) {
       try {
         const outcome = await advanceMission(deps.prisma, id, deps.now?.() ?? new Date());
-        if (outcome.notice) {
-          await deps.events.notify(outcome.notice.threadId, outcome.notice.eventSeq).catch(
-            (error) => getLogger().warn("Charlie mission terminal notice deferred to polling", error),
+        for (const notice of outcome.notices) {
+          await deps.events.notify(notice.threadId, notice.eventSeq).catch(
+            (error) => getLogger().warn("Charlie mission collaboration notice deferred to polling", error),
           );
         }
         for (const runId of outcome.scheduled) {

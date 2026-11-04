@@ -114,6 +114,11 @@ export const messagingTools: ToolHandlers = {
   },
   async message_bot(ctx, call) {
     const { deps, run, bot } = ctx;
+    if (isInternalMissionRunTrigger(run.trigger)) {
+      return call.finish({
+        error: "Mission coordination is handled by the durable mission runner. Put your complete evidence in the final reply; do not send separate bot messages or wake Chief.",
+      });
+    }
     const { args, effectKey } = call;
     // An owner-originated mission uses the durable coordinator. Ordinary peer
     // messages here create a second delegation and repeatedly wake Chief.
