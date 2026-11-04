@@ -2,7 +2,7 @@ import { normalizedHttpUrl } from "@rakazo/core/egress";
 import { executeCloudAgentTool } from "./cloud-agent-service.js";
 import { collectLogIds } from "./composio-connector.js";
 import { connectApp } from "./connect-app.js";
-import { githubSourceList, githubSourceRead } from "./github-source.js";
+import { githubSourceFind, githubSourceList, githubSourceRead } from "./github-source.js";
 import { addMcpServerFromTool } from "./mcp-server-tool.js";
 import type { RunContext } from "./run-context.js";
 import { runScopedToolExecutionId } from "./run-effects.js";
@@ -70,6 +70,9 @@ export async function connectorTool(ctx: RunContext, call: ToolCall) {
 export const integrationTools: ToolHandlers = {
   async github_source_list(ctx, call) {
     return call.finish(await githubSourceList(ctx.context, call.args));
+  },
+  async github_source_find(ctx, call) {
+    return call.finish(await githubSourceFind(ctx.context, call.args));
   },
   async github_source_read(ctx, call) {
     return call.finish(await githubSourceRead(ctx.context, call.args));

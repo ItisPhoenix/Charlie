@@ -57,24 +57,96 @@ export async function githubSourceList(
       "/contents" + (t.sourcePath ? "/" + t.sourcePath : "") +
       "?ref=" + t.commit;
     const response = await fetchSafeWebText(url, {
-      signal: ctx.signal, timeoutMs: 12000, maxBytes: 512 * 1024,
+      signal: ctx.signal, timeoutMs: 15000, maxBytes: 2 * 1024 * 1024,
       headers: { Accept: "application/vnd.github+json" },
     });
     const result: unknown = JSON.parse(response.body);
     if (!Array.isArray(result)) return { error: "Path is not a directory" };
     const filter = String(args.filter ?? "").trim().toLowerCase().slice(0, 80);
-    const entries = result
+    const matches = result
       .filter((x): x is Record<string, unknown> =>
         !!x && typeof x === "object" && !Array.isArray(x))
       .filter(x => (x.type === "file" || x.type === "dir") &&
         typeof x.path === "string" && typeof x.name === "string")
-      .filter(x => !filter || String(x.path).toLowerCase().includes(filter))
-      .slice(0, 200).map(x => ({
-        name: x.name, path: x.path, type: x.type,
-      }));
+      .filter(x => !filter || String(x.path).toLowerCase().includes(filter));
+    const offset = Number(args.offset ?? 0);
+    if (!Number.isInteger(offset) || offset < 0 || offset > matches.length) {
+      return { error: "offset must be a nonnegative index within the directory results" };
+    }
+    const entries = matches.slice(offset, offset + 200).map(x => ({
+      name: x.name, path: x.path, type: x.type,
+    }));
     return { repository: t.repository, commit: t.commit,
-      directory: t.path || "/", entries,
-      note: "Use github_source_read for a file. No repository content was modified." };
+      directory: t.path || "/", entries, totalMatches: matches.length,
+      offset, nextOffset: offset + entries.length < matches.length
+        ? offset + entries.length : null,
+      note: "Use filter or nextOffset to navigate; github_source_find searches paths across directories." };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Find matching paths across directories without returning or truncating a
+ * complete repository tree to the model. Never claim exhaustive results if
+ * GitHub reports that its tree data is incomplete.
+ */
+export async function githubSourceFind(
+  ctx: AdapterContext, args: Record<string, unknown>,
+) {
+  try {
+    const t = await resolveTarget(ctx, args);
+    const query = String(args.query ?? "").trim().toLowerCase();
+    if (query.length < 2 || query.length > 100) {
+      return { error: "query must have 2-100 characters" };
+    }
+    const directory = String(args.directory ?? "").trim().replace(/\/$/, "");
+    if (directory &&
+        (directory.startsWith("/") || directory.length > 400 ||
+         directory.split("/").some(x => !x || x === "." || x === ".." ||
+           !/^[a-zA-Z0-9_.@+-]+$/.test(x)))) {
+      return { error: "Invalid source directory" };
+    }
+    const offset = Number(args.offset ?? 0);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 100000) {
+      return { error: "offset must be between 0 and 100000" };
+    }
+    const url = "https://api.github.com/repos/" + t.owner + "/" +
+      t.name + "/git/trees/" + t.commit + "?recursive=1";
+    const response = await fetchSafeWebText(url, {
+      signal: ctx.signal, timeoutMs: 20000, maxBytes: 3 * 1024 * 1024,
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    const result: unknown = JSON.parse(response.body);
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      return { error: "GitHub did not return a source tree" };
+    }
+    const data = result as { tree?: unknown; truncated?: unknown };
+    if (data.truncated !== false || !Array.isArray(data.tree)) {
+      return { error: "Repository tree is incomplete; narrow the directory using github_source_list" };
+    }
+    const tokens = query.replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(Boolean);
+    const score = (path: string) => {
+      const text = path.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+      return tokens.reduce((n, token) => n + Number(text.includes(token)), 0);
+    };
+    const matches = data.tree
+      .filter((v): v is {path:string;type:string} =>
+        !!v && typeof v === "object" && typeof v.path === "string" &&
+        (v.type === "blob" || v.type === "tree"))
+      .filter(v => (!directory || v.path.startsWith(directory + "/")) &&
+        score(v.path) > 0)
+      .sort((a, b) => score(b.path) - score(a.path) ||
+        a.path.localeCompare(b.path));
+    const entries = matches.slice(offset, offset + 100).map(v => ({
+      path: v.path, type: v.type === "tree" ? "dir" : "file",
+    }));
+    return { repository: t.repository, commit: t.commit,
+      query, directory: directory || "/", totalMatches: matches.length,
+      entries, offset,
+      nextOffset: offset + entries.length < matches.length
+        ? offset + entries.length : null,
+      note: "Search matches paths and filenames, not file content. Use github_source_read to inspect a result." };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -92,7 +164,16 @@ export async function githubSourceRead(
       signal: ctx.signal, timeoutMs: 12000, maxBytes: 768 * 1024,
     });
     const lines = response.body.replace(/\r\n/g, "\n").split("\n");
-    const start = Number(args.startLine ?? 1);
+    const find = String(args.find ?? "").trim().toLowerCase();
+    if (find.length > 120) return { error: "find must be 120 characters or less" };
+    const matchLines = find
+      ? lines.flatMap((line, i) => line.toLowerCase().includes(find) ? [i + 1] : [])
+      : [];
+    if (find && !matchLines.length) {
+      return { repository: t.repository, commit: t.commit,
+        path: t.path, error: "Text was not found in file", totalLines: lines.length };
+    }
+    const start = Number(args.startLine ?? (matchLines[0] ?? 1));
     const count = Number(args.lineCount ?? 120);
     if (!Number.isInteger(start) || start < 1 || start > lines.length ||
         !Number.isInteger(count) || count < 1 || count > 200) {
@@ -104,7 +185,7 @@ export async function githubSourceRead(
     return { repository: t.repository, commit: t.commit,
       path: t.path, url, startLine: start,
       endLine: Math.min(lines.length, start + count - 1),
-      totalLines: lines.length,
+      totalLines: lines.length, matchLines: matchLines.slice(0, 40),
       code: excerpt.slice(0, 29000),
       truncated: excerpt.length > 29000 ||
         start + count - 1 < lines.length };

@@ -769,7 +769,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "github_source_list",
-    description: "Read-only source directory listing for a public GitHub repository. Repository defaults to configured deployment source, and revision defaults to its deployed SHA or the remote HEAD. Use returned paths and revision for subsequent reads.",
+    description: "Read-only source directory listing at the deployed revision. Large directories are paginated: use filter or nextOffset to see remaining files. Use github_source_find to locate matching source paths across the entire repository.",
     inputSchema: {
       type: "object",
       properties: {
@@ -777,8 +777,25 @@ export const builtinAgentTools: ConnectorTool[] = [
         commit: { type: "string", description: "Optional exact revision; resolves automatically when omitted." },
         path: { type: "string", description: "Directory path relative to repository root; omit for root" },
         filter: { type: "string", description: "Optional filename/path substring filter" },
+        offset: { type: "integer", minimum: 0, description: "Page offset returned as nextOffset (default 0)." },
       },
       required: [],
+    },
+    readOnly: true,
+  },
+  {
+    name: "github_source_find",
+    description: "Search for source file and directory paths across a public GitHub repository, pinned automatically to the configured revision. Matches filenames/paths, not file content. Use for locating relevant implementation files without a giant directory listing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: { type: "string", description: "Optional owner/repo. Defaults to deployment source." },
+        commit: { type: "string", description: "Optional exact revision; defaults to the deployed revision." },
+        query: { type: "string", description: "Two or more characters describing the filename or path to find." },
+        directory: { type: "string", description: "Optional repository-relative directory to narrow results." },
+        offset: { type: "integer", minimum: 0, description: "Pagination offset from a previous result." },
+      },
+      required: ["query"],
     },
     readOnly: true,
   },
@@ -793,6 +810,7 @@ export const builtinAgentTools: ConnectorTool[] = [
         path: { type: "string", description: "File path from github_source_list" },
         startLine: { type: "integer", minimum: 1, description: "First line to show (default 1)" },
         lineCount: { type: "integer", minimum: 1, maximum: 200, description: "Lines to show (default 120)" },
+        find: { type: "string", description: "Optional text to locate within a long source file; returns matching line numbers and starts near the first match unless startLine was provided." },
       },
       required: ["path"],
     },
