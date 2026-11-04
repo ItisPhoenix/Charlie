@@ -20,7 +20,7 @@ it("isolates main and sibling effects with identical wire IDs and reconciles a c
       type: "tool" as const,
       id,
       name: "run_subagent",
-      arguments: { name: id, task: "Write the synthetic fixture." },
+      arguments: { name: id, task: "Write the synthetic fixture.", tools: ["write_file"] },
     },
   });
   const done = {
