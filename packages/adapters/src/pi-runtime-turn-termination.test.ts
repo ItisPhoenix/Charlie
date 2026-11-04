@@ -328,6 +328,42 @@ it("keeps the tool-call budget reply ahead of a terminating result", async () =>
   });
 });
 
+it("rejects a helper that explicitly requests bot-management authority", async () => {
+  const executeTool = vi.fn(async () => ({ ok: true }));
+  providerState.stream
+    .mockImplementationOnce(() =>
+      toolCalls(primary, [
+        {
+          type: "toolCall",
+          id: "parent-1",
+          name: "run_subagent",
+          arguments: {
+            name: "helper",
+            task: "Change the model.",
+            tools: ["update_bot"],
+          },
+        },
+      ]),
+    )
+    .mockImplementation(() => reply(primary, "I cannot grant that helper authority."));
+
+  const events = await run(request(executeTool, { tools: subagentTools }));
+  expect(executeTool).not.toHaveBeenCalled();
+  expect(providerState.stream).toHaveBeenCalledTimes(2);
+  const parentContext = providerState.stream.mock.calls.at(-1)?.[1] as {
+    messages: Array<{
+      role: string;
+      toolName?: string;
+      content?: Array<{ type: string; text?: string }>;
+    }>;
+  };
+  const result = parentContext.messages
+    .filter((message) => message.role === "toolResult" && message.toolName === "run_subagent")
+    .at(-1)?.content?.[0]?.text;
+  expect(result).toContain("Subagent refused unavailable tools: update_bot");
+  expect(events.at(-1)).toEqual({ type: "done", text: "I cannot grant that helper authority." });
+});
+
 it("returns the refusal a subagent's mixed batch ended on as its result", async () => {
   const { executeTool, names } = refusingExecutor("list_files");
   providerState.stream
