@@ -607,11 +607,22 @@ describePostgres("row-level security (PostgreSQL)", () => {
       SELECT policyname, qual, with_check FROM pg_policies WHERE schemaname = 'public'
         AND (policyname LIKE '%\\_system' OR qual LIKE '%rls\\_%' OR with_check LIKE '%rls\\_%')`;
     expect(policies.length).toBeGreaterThan(50);
+    // Charlie missions have an owner-scoped policy that also permits a keyed
+    // system bypass. It must retain BOTH owner predicates and the key check.
+    const missionsOwner = policies.find((p) => p.policyname === "charlie_missions_owner");
+    expect(missionsOwner?.qual).toContain("app_rls_bypass()");
+    expect(missionsOwner?.qual).toContain("spaceId");
+    expect(missionsOwner?.qual).toContain("userId");
+    expect(missionsOwner?.with_check).toContain("app_rls_bypass()");
+    const systemPolicies = policies.filter((p) => p.policyname !== "charlie_missions_owner");
     expect(
-      policies.filter(
+      systemPolicies.filter(
         (p) => p.qual !== "( SELECT app_rls_bypass() AS app_rls_bypass)" || p.with_check !== null,
       ),
     ).toEqual([]);
+    expect(systemPolicies.some((p) => p.policyname === "charlie_owner_origin_proofs_system")).toBe(
+      true,
+    );
   });
 
   it("lets a system step inside a tenant transaction across tenants and back", async () => {
@@ -837,6 +848,10 @@ describePostgres("row-level security (PostgreSQL)", () => {
       db as unknown as { _runtimeDataModel: { models: Record<string, { dbName: string | null }> } }
     )._runtimeDataModel;
     const mapped = [...ROW_SECURITY_MODELS].map((name) => models[name]?.dbName ?? name);
-    expect(tables).toEqual(mapped.sort());
+    // These Charlie tables use raw-SQL migrations instead of Prisma models,
+    // but must still have RLS. Do not exempt them from the protection check.
+    expect(tables).toEqual(
+      [...mapped, "charlie_owner_origin_proofs", "charlie_missions"].sort(),
+    );
   });
 });
