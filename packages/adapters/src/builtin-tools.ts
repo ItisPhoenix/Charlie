@@ -1066,7 +1066,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Charlie executive: persist one bounded owner mission with an acyclic dependency graph and named agent assignees. Does not dispatch work.",
+    description: "Charlie executive: persist one bounded owner mission with named agent assignees and criteria; THEN call mission_dispatch on the returned missionId. Use this lane for owner goals involving specialist work instead of message_bot. For read-only source reviews set criteria to exact cited files/functions and a PROPOSED reproducible test with expected assertions, not an executed runtime test.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1083,7 +1083,7 @@ export const builtinAgentTools: ConnectorTool[] = [
               assigneeBotId: { type: "string" },
               verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
               dependsOn: { type: "array", items: { type: "string" } },
-              verificationCriteria: { type: "string", maxLength: 2000 },
+              verificationCriteria: { type: "string", maxLength: 2000, description: "Specify observable acceptance evidence and its epistemic level (read-only cited source analysis versus an actually executed live test). Never require runtime execution when the owner asked for source-only review." },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
             },
             required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","maxAttempts"],
@@ -1111,7 +1111,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_dispatch",
-    description: "Charlie executive: send dependency-ready work to assigned bots with durable deduplicated messages. Only a fresh authenticated owner-to-Charlie request is allowed.",
+    description: "Activate the persisted Charlie mission. Durable background reconciliation dispatches ready work, retries within budget, and posts one terminal report. Call once after mission_create; do NOT also message_bot or manually poll/reconcile.",
     inputSchema: {
       type: "object",
       properties: { missionId: { type: "string" } },
@@ -1740,7 +1740,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "message_bot",
     description:
-      'Send a useful update, question, or result to another of the user\'s bots. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. "[to Comms] ...") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.',
+      'Send a useful update, question, or result to another of the user\'s bots. NOT for Chief\'s owner-originated missions: use mission_create + mission_dispatch instead. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. "[to Comms] ...") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.',
     inputSchema: {
       type: "object",
       properties: {
