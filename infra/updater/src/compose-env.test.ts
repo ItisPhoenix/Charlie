@@ -223,7 +223,12 @@ describe("api and worker environment allowlists", () => {
       for (const service of ["api", "worker"] as const) {
         for (const file of files) expect(loadServices(file)[service]?.env_file).toBeUndefined();
         const keys = Object.keys(stackEnvironment(files, service)).sort();
-        expect({ service, keys }).toEqual({ service, keys: expectedKeys(service) });
+        const expected = expectedKeys(service);
+        expect({
+          service,
+          missing: expected.filter((key) => !keys.includes(key)),
+          unexpected: keys.filter((key) => !expected.includes(key)),
+        }).toEqual({ service, missing: [], unexpected: [] });
       }
     },
   );
