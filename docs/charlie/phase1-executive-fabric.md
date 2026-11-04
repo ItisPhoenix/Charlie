@@ -97,3 +97,10 @@ Never deploy an incomplete Phase 1 batch to production.
 - This uses the existing content-key provider and fails closed if content encryption is disabled; key rotation uses the embedded ciphertext key ID for decryption.
 - Deployment requires an encrypted recovery backup of legacy mission rows before worker migration, because older application revisions cannot read the newly sealed JSONB.
 - Positive-path dependency execution, live encrypted read/write acceptance, and sensitive-backup retention remain separate release checks.
+
+## Phase 1 specialist boundary — scoped delivery
+- An agent receives one work item's title and completion criteria as its executable assignment. The overall mission goal is orientation only, not an instruction to launch or finish dependent work.
+- The runtime, not the specialist, records completion and starts dependency-ready tasks. Queued/planned downstream work does not make the current specialist's own report incomplete.
+- Mission-task runs do not offer coordinator-only mission list/status tools. Chief retains owner-facing mission visibility, and independent review runs retain read-only assessment tools.
+- A read-only specialist report can be delivered without a second AI approval, but source inspection does not prove runtime behavior. Actual missing evidence still blocks the item. Owner-origin host grants, effect gates and replay protections remain unchanged.
+- The legacy owner-triggered reconcile path preserves already-delivered terminal work. Final acceptance requires a real two-stage mission with recorded ordering and attributable evidence.

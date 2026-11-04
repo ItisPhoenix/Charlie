@@ -589,11 +589,17 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           continue;
         }
         const prompt = [
-          "Charlie mission continued as background delegated work.",
-          "Mission: " + row.id + ", task: " + key,
-          "Owner objective: " + row.plan.goal,
-          "Work: " + spec.title,
-          "Completion criteria: " + spec.verificationCriteria,
+          "Charlie delegated specialist work item. Complete exactly THIS assignment.",
+          "You are the specialist assigned to a single task, NOT the mission coordinator.",
+          "The executive runtime will record your result and start any dependent work.",
+          "Never attempt to launch, finish, verify, or report the status of other work items.",
+          "Other work items being planned or waiting on yours is EXPECTED and is not",
+          "evidence that your assigned work is blocked. Do not require the entire",
+          "owner mission to finish before submitting your individual result.",
+          "Task: " + spec.title,
+          "Criteria for THIS task only: " + spec.verificationCriteria,
+          "Mission context for orientation ONLY, not extra work: " + row.plan.goal,
+          "Mission: " + row.id + ", assigned work key: " + key,
           "Use ordinary tools and existing permission gates.",
           "Find source files by path search when needed; read relevant line ranges",
           "and locate matches within long files. Avoid assuming the first page",
@@ -604,9 +610,14 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           "Return one complete evidence-based result under 12000 characters.",
           spec.completionPolicy === "report"
             ? "First line exactly MISSION_REPORT_DELIVERED or MISSION_REPORT_BLOCKED. " +
-              "Second line begins Evidence:. DELIVERED means the informational request " +
-              "was fulfilled, not independently verified. If required sources or " +
-              "observations were unavailable, choose BLOCKED and explain why."
+              "Second line begins Evidence:. DELIVERED means you completed THIS " +
+              "informational assignment and can provide evidence, not that its " +
+              "claims were independently or experimentally validated. Clearly " +
+              "separate inspected source behavior from tested runtime behavior. " +
+              "Choose BLOCKED only when the assigned deliverable is unfulfilled " +
+              "because required evidence or access is missing. Unfinished future " +
+              "tasks or your inability to control the mission coordinator are " +
+              "NEVER reasons to block this task. Do not invent evidence."
             : "Include concrete supporting evidence; execution and independent assessment are distinct.",
           "Do not send incremental progress messages to the owner or coordinator;",
           "return the complete result once, with specific blockers if incomplete.",

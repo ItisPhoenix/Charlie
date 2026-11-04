@@ -139,6 +139,11 @@ export function selectBuiltinToolsForRun(options: {
         ].includes(tool.name)) &&
       (!isInternalMissionRunTrigger(options.trigger) ||
         !["message_user", "message_bot", "message_agent", "handoff_to_bot", "call_user"].includes(tool.name)) &&
+      // Specialists execute one assigned work item. They do not coordinate
+      // mission state, so expose mission status only to Chief/owner turns
+      // and assessment runs, not the task-execution subrun itself.
+      (options.trigger !== "charlie_mission" ||
+        (tool.name !== "mission_list" && tool.name !== "mission_status")) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.userComputer || tool.name !== "user_computer_shell") &&
       ((options.userComputer && options.userComputerScreen) ||

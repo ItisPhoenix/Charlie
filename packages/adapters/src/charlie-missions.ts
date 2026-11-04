@@ -369,7 +369,8 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
 
   for (const spec of row.plan.work) {
     const prior = next.find((item) => item.key === spec.key);
-    if (prior?.state === "submitted" || prior?.state === "verifying" || prior?.state === "verified" ||
+    if (prior?.state === "submitted" || prior?.state === "verifying" ||
+        prior?.state === "verified" || prior?.state === "delivered" ||
         prior?.state === "failed" || prior?.state === "cancelled" ||
         prior?.state === "blocked") continue;
 

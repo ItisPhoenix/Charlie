@@ -1115,7 +1115,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Create and dispatch an executive mission. For EVERY work item select completionPolicy=report when the requested outcome is an informational deliverable (read-only source analysis, explanation, research, comparisons, or identifying evidence/limitations), even if the owner uses words like inspect, verify, or check. This reports completion of the deliverable, not independent factual verification. Select completionPolicy=review when consequential external actions occur or independent outcome assessment is requested. No redundant AI reviews for informational reports. Preserve all permissions and effect gates.",
+    description: "Create and dispatch a bounded executive mission from the owner's ordinary goal. Each work item must be an independently completable assignment with its OWN concrete criteria; a specialist must never be responsible for starting, completing or verifying another work item. The durable executive runtime releases dependencies. Select completionPolicy=report for source analysis, explanations, research and other informational deliverables; this records report delivery, not independently verified truth. Select completionPolicy=review when an external action or outcome requires further assessment. Do not add redundant AI reviewers, hidden approvals, or invented dependencies. Persist plan and dispatch once.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1132,7 +1132,7 @@ export const builtinAgentTools: ConnectorTool[] = [
               assigneeBotId: { type: "string" },
               verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
               dependsOn: { type: "array", items: { type: "string" } },
-              verificationCriteria: { type: "string", maxLength: 2000, description: "Describe the result required and evidence expected; distinguish delivery from executed outcomes." },
+              verificationCriteria: { type: "string", maxLength: 2000, description: "Criteria achievable by THIS assignee alone. Require evidence for the individual deliverable, not running/releasing dependent tasks or completing the whole mission. Do not confuse source inspection with proof of actual runtime behavior." },
               completionPolicy: { type: "string", enum: ["report", "review"], description: "Required for each task. report for read-only informational findings, including researched or source-supported reports. review for modifying/consequential actions or independently assessed outcomes. Delivery is not factual verification." },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
             },
