@@ -32,6 +32,7 @@ import { PiAgentRuntime } from "./pi-runtime.js";
 const primary = model("provider-a", "primary", 32_768);
 
 const REFUSAL = OWNER_SETTINGS_REFUSAL_REPLY;
+const READ_REFUSAL = "This helper cannot access the requested file.";
 const FIRST_REFUSAL =
   "You cannot change owner settings from this chat; ask the owner to change them in Settings.";
 
@@ -199,16 +200,18 @@ const texts = (events: AgentRuntimeEvent[]) =>
   events.flatMap((event) => (event.type === "text" ? [event.text] : []));
 
 /** The refusal contract from run-context: the first refusal is an error, the second ends the turn. */
-function refusingExecutor() {
+function refusingExecutor(target: "update_bot" | "list_files" = "update_bot") {
   let refusals = 0;
   const names: string[] = [];
   const executeTool = vi.fn(async (name: string) => {
     names.push(name);
-    if (name !== "update_bot") return { ok: true };
+    if (name !== target) return { ok: true };
     refusals += 1;
     return refusals === 1
-      ? { error: FIRST_REFUSAL }
-      : terminatingToolResult(REFUSAL, { refused: "owner-settings" });
+      ? { error: target === "update_bot" ? FIRST_REFUSAL : "File access is denied." }
+      : terminatingToolResult(target === "update_bot" ? REFUSAL : READ_REFUSAL, {
+          refused: target === "update_bot" ? "owner-settings" : "file-access",
+        });
   });
   return { executeTool, names };
 }
@@ -326,7 +329,7 @@ it("keeps the tool-call budget reply ahead of a terminating result", async () =>
 });
 
 it("returns the refusal a subagent's mixed batch ended on as its result", async () => {
-  const { executeTool, names } = refusingExecutor();
+  const { executeTool, names } = refusingExecutor("list_files");
   providerState.stream
     .mockImplementationOnce(() =>
       toolCalls(primary, [
@@ -334,25 +337,25 @@ it("returns the refusal a subagent's mixed batch ended on as its result", async 
           type: "toolCall",
           id: "parent-1",
           name: "run_subagent",
-          arguments: { name: "helper", task: "Change the model." },
+          arguments: { name: "helper", task: "Read the files.", tools: ["list_files"] },
         },
       ]),
     )
     .mockImplementationOnce(() =>
       toolCalls(primary, [
-        { type: "toolCall", id: "child-1", name: "update_bot", arguments: { model: "other" } },
+        { type: "toolCall", id: "child-1", name: "list_files", arguments: { path: "" } },
       ]),
     )
     .mockImplementationOnce(() =>
       toolCalls(primary, [
-        { type: "toolCall", id: "child-2", name: "update_bot", arguments: { model: "other" } },
+        { type: "toolCall", id: "child-2", name: "list_files", arguments: { path: "" } },
         { type: "toolCall", id: "child-3", name: "list_files", arguments: { path: "" } },
       ]),
     )
-    .mockImplementation(() => reply(primary, "The helper could not change the model."));
+    .mockImplementation(() => reply(primary, "The helper could not read the file."));
   const events = await run(request(executeTool, { tools: subagentTools }));
 
-  expect(names).toEqual(["update_bot", "update_bot", "list_files"]);
+  expect(names).toEqual(["list_files", "list_files", "list_files"]);
   // Parent prompt, two child turns, parent final reply; the child makes no third request.
   expect(providerState.stream).toHaveBeenCalledTimes(4);
   expect(events.filter((event) => event.type === "subagent" && event.status !== "running")).toEqual(
@@ -361,9 +364,9 @@ it("returns the refusal a subagent's mixed batch ended on as its result", async 
         type: "subagent",
         agentId: expect.any(String),
         name: "helper",
-        task: "Change the model.",
+        task: "Read the files.", tools: ["list_files"],
         status: "completed",
-        result: REFUSAL,
+        result: READ_REFUSAL,
       },
     ],
   );
@@ -378,9 +381,9 @@ it("returns the refusal a subagent's mixed batch ended on as its result", async 
   const helperResult = parentContext.messages
     .filter((message) => message.role === "toolResult" && message.toolName === "run_subagent")
     .at(-1);
-  expect(helperResult?.content?.[0]?.text).toContain(REFUSAL);
+  expect(helperResult?.content?.[0]?.text).toContain(READ_REFUSAL);
   expect(helperResult?.content?.[0]?.text).not.toContain("Subagent failed");
-  expect(events.at(-1)).toEqual({ type: "done", text: "The helper could not change the model." });
+  expect(events.at(-1)).toEqual({ type: "done", text: "The helper could not read the file." });
 });
 
 it("keeps a follow-up queued during the mixed batch unclaimed", async () => {
@@ -424,7 +427,7 @@ it("keeps a follow-up queued during the mixed batch unclaimed", async () => {
 });
 
 it("keeps a subagent's refusal in its result after long narration", async () => {
-  const { executeTool } = refusingExecutor();
+  const { executeTool } = refusingExecutor("list_files");
   const narration = "Checking the settings. ".repeat(600);
   providerState.stream
     .mockImplementationOnce(() =>
@@ -433,36 +436,36 @@ it("keeps a subagent's refusal in its result after long narration", async () => 
           type: "toolCall",
           id: "parent-1",
           name: "run_subagent",
-          arguments: { name: "helper", task: "Change the model." },
+          arguments: { name: "helper", task: "Read the files.", tools: ["list_files"] },
         },
       ]),
     )
     .mockImplementationOnce(() =>
       narratedToolCalls(primary, narration, [
-        { type: "toolCall", id: "child-1", name: "update_bot", arguments: { model: "other" } },
+        { type: "toolCall", id: "child-1", name: "list_files", arguments: { path: "" } },
       ]),
     )
     .mockImplementationOnce(() =>
       toolCalls(primary, [
-        { type: "toolCall", id: "child-2", name: "update_bot", arguments: { model: "other" } },
+        { type: "toolCall", id: "child-2", name: "list_files", arguments: { path: "" } },
         { type: "toolCall", id: "child-3", name: "list_files", arguments: { path: "" } },
       ]),
     )
-    .mockImplementation(() => reply(primary, "The helper could not change the model."));
+    .mockImplementation(() => reply(primary, "The helper could not read the file."));
   expect(narration.length).toBeGreaterThan(12_000);
   const events = await run(request(executeTool, { tools: subagentTools }));
 
   const finished = events.filter(
     (event) => event.type === "subagent" && event.status !== "running",
   ) as Array<{ result?: string }>;
-  expect(finished.at(-1)?.result?.endsWith(REFUSAL)).toBe(true);
+  expect(finished.at(-1)?.result?.endsWith(READ_REFUSAL)).toBe(true);
   const parentContext = providerState.stream.mock.calls.at(-1)?.[1] as {
     messages: Array<{ role: string; toolName?: string; content?: Array<{ text?: string }> }>;
   };
   const helperResult = parentContext.messages
     .filter((entry) => entry.role === "toolResult" && entry.toolName === "run_subagent")
     .at(-1)?.content?.[0]?.text;
-  expect(helperResult).toContain(REFUSAL);
+  expect(helperResult).toContain(READ_REFUSAL);
   expect(helperResult?.length).toBeLessThanOrEqual(12_000);
 });
 
