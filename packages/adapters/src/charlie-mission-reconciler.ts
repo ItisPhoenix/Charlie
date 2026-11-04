@@ -56,7 +56,7 @@ function missionSummary(row: MissionRow, progress: Progress[]): string {
     "Charlie mission " + row.id + " — " + result.state.toUpperCase(),
     (result.verified + result.delivered) + "/" + result.total +
       " work items finished (" + result.delivered + " reports delivered, " +
-      result.verified + " assessed).
+      result.verified + " assessed).",
   ];
   for (const spec of row.plan.work) {
     const item = progress.find((entry) => entry.key === spec.key);
