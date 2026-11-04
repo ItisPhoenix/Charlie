@@ -51,7 +51,7 @@ function missionSummary(row: MissionRow, progress: Progress[]): string {
     lines.push("- " + spec.title + ": " + (item?.state ?? "planned") +
       " (" + (item?.attempts ?? 0) + "/" + spec.maxAttempts + " attempts)");
     const assessment = item?.chiefEvidence
-      ?.replace(/^MISSION_CHIEF_[A-Z]+\\s*\\nEvidence:\\s*/i, "")
+      ?.replace(/^MISSION_CHIEF_[A-Z]+\s*\nEvidence:\s*/i, "")
       .trim();
     if (assessment) {
       lines.push("  Chief assessment: " + assessment.slice(0, 700) +
@@ -61,7 +61,7 @@ function missionSummary(row: MissionRow, progress: Progress[]): string {
     }
   }
   lines.push("See mission status for the complete recorded evidence and run IDs.");
-  return lines.join("\\n").slice(0, 6000);
+  return lines.join("\n").slice(0, 6000);
 }
 function boundedOutcome(value: string): string {
   const output = value.trim();
