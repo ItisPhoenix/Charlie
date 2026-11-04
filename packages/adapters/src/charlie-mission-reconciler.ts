@@ -16,6 +16,8 @@ type Progress = CharlieWorkProgress & {
   chiefRunId?: string;
   chiefDecision?: "accept" | "retry" | "escalate" | "block";
   chiefEvidence?: string;
+  /** Delivery was verified by a completed read-only run, not by a second AI judge. */
+  completionBasis?: "read_only_delivery";
 };
 
 type MissionRow = {
@@ -40,6 +42,31 @@ type MissionNotice = { threadId: string; eventSeq: number };
 type AdvanceResult = { scheduled: string[]; notices: MissionNotice[] };
 const TERMINAL_MISSION_STATES = new Set(["completed", "blocked", "failed"]);
 
+// Only explicitly informational work may skip a second model assessment.
+// Tool effects must also all be completed and on this read-only allowlist.
+// This is proof of successful delivery, NOT independent factual verification.
+const READ_ONLY_DELIVERY_EFFECTS = new Set([
+  "web_search", "web_fetch", "github_source_list", "github_source_read",
+  "list_files", "read_file", "search_history", "read_history",
+  "recall_memory", "mission_status", "browser_snapshot", "computer_observe",
+  "board_tickets", "ticket_get", "task_catalog",
+]);
+
+function canDeliverWithoutSecondModel(
+  goal: string,
+  spec: { title: string; verificationCriteria: string; verifierBotId?: string },
+  evidence: string,
+): boolean {
+  if (spec.verifierBotId || evidence.length < 100 ||
+      evidence.includes("EVIDENCE_TRUNCATED")) return false;
+  if (!/\b(inspect|audit|review|research|investigate|analyse|analyze|summarize|compare|explain|trace|assess|report)\b/i.test(spec.title)) return false;
+  if (/\b(independent(?:ly)?|fix|patch|implement|apply|change|write|edit|delete|remove|restart|deploy|install|update|configure|create|modify|send|purchase|pay|transfer|execute|run)\b/i.test(spec.title)) return false;
+  if (!/\b(read[- ]only|source[- ]only|source[- ]based|no (?:code|file|service) changes|without (?:applying|making) changes|do not (?:run|modify|make|change))\b/i.test(goal + " " + spec.verificationCriteria)) return false;
+  if (/^\s*(?:FAILED|BLOCKED|ERROR|UNABLE|INCOMPLETE)\b/i.test(evidence) ||
+      /\b(?:could(?:n't| not)|unable to) (?:access|locate|retrieve|verify)\b/i.test(evidence)) return false;
+  return true;
+}
+
 function missionSummary(row: MissionRow, progress: Progress[]): string {
   const result = decideCharlieMissionWork(row.plan, progress);
   const lines = [
@@ -59,9 +86,11 @@ function missionSummary(row: MissionRow, progress: Progress[]): string {
     }
     if (item?.evidence?.trim()) {
       const evidence = item.evidence.trim();
-      lines.push("  " + (item.state === "verified"
-        ? "Chief-accepted specialist report (runtime validation only if explicitly stated): "
-        : "Unverified specialist report: ") +
+      lines.push("  " + (item.completionBasis === "read_only_delivery"
+        ? "Completed read-only specialist report (delivery confirmed, factual claims not independently reviewed): "
+        : item.state === "verified"
+          ? "Chief-accepted specialist report (runtime validation only if explicitly stated): "
+          : "Unverified specialist report: ") +
         evidence.slice(0, 1900) + (evidence.length > 1900 ? "…" : ""));
     }
   }
@@ -282,7 +311,7 @@ async function missionPeerReceipt(
     : [{ kind: "bot_message_received" as const,
       fromBotId: spec.assigneeBotId, fromBotName: peer.name,
       text: "Completed delegated mission " + row.id + " / " + spec.key +
-        " (attempt " + attempt + "); evidence queued for Chief assessment.",
+        " (attempt " + attempt + "); result recorded in the mission ledger.",
       intent: "result" as const }];
   const nonce = "charlie:mission:peer:" + row.id + ":" +
     spec.key + ":" + attempt + ":" + direction;
@@ -337,8 +366,22 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           if (peerNotice) notices.push(peerNotice);
           const evidence = await finalOutput(tx, child.id, spec.assigneeBotId, row.chiefBotId);
           if (evidence.length >= 40) {
-            next[position] = { ...progress, state: "submitted", evidence,
-              delegatedRunId: child.id };
+            let directDelivery = false;
+            if (canDeliverWithoutSecondModel(row.plan.goal, spec, evidence)) {
+              // A non-read-only or unresolved tool effect must NEVER get a
+              // delivery-only acceptance without further assessment.
+              const effects = await tx.externalEffect.findMany({
+                where: { runId: child.id },
+                select: { kind: true, status: true },
+              });
+              directDelivery = effects.every((effect) =>
+                effect.status === "completed" && READ_ONLY_DELIVERY_EFFECTS.has(effect.kind));
+            }
+            next[position] = directDelivery
+              ? { ...progress, state: "verified", evidence,
+                  delegatedRunId: child.id, completionBasis: "read_only_delivery" }
+              : { ...progress, state: "submitted", evidence,
+                  delegatedRunId: child.id };
           } else {
             // A completed run without usable evidence cannot silently hold the mission.
             next[position] = { ...progress, state: "blocked",

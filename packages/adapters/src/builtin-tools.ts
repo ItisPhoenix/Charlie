@@ -1097,7 +1097,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Charlie executive: persist one bounded owner mission with named agent assignees and criteria; THEN call mission_dispatch on the returned missionId. Use this lane for owner goals involving specialist work instead of message_bot. For read-only source reviews set criteria to exact cited files/functions and a PROPOSED reproducible test with expected assertions, not an executed runtime test.",
+    description: "Charlie executive: turn a normal-language owner goal into the SMALLEST useful bounded mission; use only relevant specialists, avoid invented reviewer roles and unnecessary dependent stages. Persist the mission then call mission_dispatch once. Read-only informational work may finish by delivering the specialist's report without a mandatory second AI assessment. For actions, consequential changes, ambiguous claims, failures, or explicitly requested independent checks, retain stronger evidence and safety requirements. Never claim a report was independently verified when it was only delivered.",
     inputSchema: {
       type: "object",
       properties: {

@@ -8,6 +8,7 @@ type EvidenceProgress = CharlieWorkProgress & {
   chiefRunId?: string;
   chiefDecision?: "accept" | "retry" | "escalate" | "block";
   chiefEvidence?: string;
+  completionBasis?: "read_only_delivery";
 };
 
 type ContextResult =
@@ -37,10 +38,17 @@ export function verifiedDependencyContext(
       !!entry.chiefRunId && !!entry.chiefEvidence?.startsWith("MISSION_CHIEF_ACCEPT");
     const independentlyAccepted = !!entry?.verifierRunId &&
       !!entry.reviewEvidence?.startsWith("MISSION_REVIEW_PASS");
+    // Informational tasks may unlock another informational task when their
+    // real completed run delivered a bounded report. This is not a claim of
+    // independent factual corroboration; preserve that distinction downstream.
+    const readOnlyDelivered = entry?.completionBasis === "read_only_delivery";
     if (entry?.state !== "verified" ||
         !entry.delegatedRunId || !entry.evidence?.trim() ||
-        (!chiefAccepted && !independentlyAccepted)) {
+        (!chiefAccepted && !independentlyAccepted && !readOnlyDelivered)) {
       return { ok: false, error: "Missing accepted, attributable evidence for dependency: " + key };
+    }
+    if (readOnlyDelivered && !chiefAccepted && !independentlyAccepted) {
+      blocks.push("Dependency " + key + ": a read-only report was delivered; its factual claims were not independently verified.");
     }
     blocks.push(
       "Dependency: " + key,

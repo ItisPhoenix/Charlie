@@ -83,3 +83,10 @@ Never deploy an incomplete Phase 1 batch to production.
 - This batch is source-only, not a deployment. Mission data encryption,
   isolated PostgreSQL migration acceptance, and live multi-agent tests are
   required before production.
+
+## Phase 1 completion policy — risk-proportionate delivery
+- Routine, explicitly read-only informational tasks do not need a second AI approval run: a completed specialist run with a nontruncated report and only completed read-only tool effects may be marked delivered and unlock read-only follow-up work.
+- The mission ledger stores this basis explicitly as `completionBasis: read_only_delivery`. This means delivery was confirmed, not that factual claims were independently corroborated.
+- Missing or truncated reports, incomplete tool effects, unrecognized effects, consequential actions and explicit independent reviews retain the Chief assessment path. Root authority, owner-origin grants, and effect replay protections are unchanged.
+- Use ordinary natural-language owner requests. Chief selects specialists; the owner does not supply IDs or commit hashes.
+- Acceptance remains subject to live deployment and the separate sensitive mission-data encryption requirement.
