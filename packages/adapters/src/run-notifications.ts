@@ -2,6 +2,7 @@ import type { NotificationMessage } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
   isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
   plainTextFromMarkdown,
   redactSecrets,
   truncatedPlainText,
@@ -62,7 +63,8 @@ export async function notifyRun(
 ) {
   if (
     !deps.notifications ||
-    (isBackgroundRunTrigger(run.trigger) && message.kind !== "help" && message.kind !== "takeover")
+    ((isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger)) &&
+      message.kind !== "help" && message.kind !== "takeover")
   )
     return;
   const routineId = message.kind === "failure" ? run.routineId : null;
@@ -104,7 +106,8 @@ export async function notifyRun(
 }
 
 export function runSendsFinishNotification(trigger: string): boolean {
-  return trigger !== "created" && !isBackgroundRunTrigger(trigger);
+  return trigger !== "created" && !isBackgroundRunTrigger(trigger) &&
+    !isInternalMissionRunTrigger(trigger);
 }
 
 /** User-facing text for completion notifications; empty when only tool/step activity remains. */
@@ -140,7 +143,7 @@ export function completionMarksUnread(
   userFacingPeerReply = false,
 ): boolean {
   if (trigger === "bot_message") return userFacingPeerReply;
-  if (isBackgroundRunTrigger(trigger)) return false;
+  if (isBackgroundRunTrigger(trigger) || isInternalMissionRunTrigger(trigger)) return false;
   return (trigger !== "routine" && trigger !== "reaction") || Boolean(text);
 }
 
@@ -149,7 +152,7 @@ export function subagentMarksUnread(
   status: "running" | "completed" | "failed",
   userFacingPeerReply = false,
 ) {
-  if (isBackgroundRunTrigger(trigger)) return false;
+  if (isBackgroundRunTrigger(trigger) || isInternalMissionRunTrigger(trigger)) return false;
   return (
     status === "failed" ||
     (trigger === "bot_message" && userFacingPeerReply) ||

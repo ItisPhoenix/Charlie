@@ -1,4 +1,4 @@
-import { isBackgroundRunTrigger, redactSecrets } from "@rakazo/core";
+import { isBackgroundRunTrigger, isInternalMissionRunTrigger, redactSecrets } from "@rakazo/core";
 import {
   connectAgent,
   messageConnectedAgent,
@@ -73,6 +73,9 @@ export const messagingTools: ToolHandlers = {
   },
   async message_user(ctx, call) {
     const { deps, run } = ctx;
+    if (isInternalMissionRunTrigger(run.trigger)) {
+      return call.finish({ error: "Internal mission runs save their result to the mission ledger; owner progress messages are unavailable." });
+    }
     const { args } = call;
     const { reply } = ctx.state;
     const rawMessage = redactSecrets(String(args.message ?? ""), ctx.secrets);

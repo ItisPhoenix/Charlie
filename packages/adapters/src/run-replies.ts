@@ -1,5 +1,5 @@
 import type { MessageBlock } from "@rakazo/contracts";
-import { isBackgroundRunTrigger } from "@rakazo/core";
+import { isBackgroundRunTrigger, isInternalMissionRunTrigger } from "@rakazo/core";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { messageUserMaxLength } from "./user-progress.js";
 
@@ -22,7 +22,8 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
  * Background runs never promote it.
  */
 export function runPromotesMidTurnNarration(trigger: string): boolean {
-  return trigger !== "routine" && trigger !== "bot_message" && !isBackgroundRunTrigger(trigger);
+  return trigger !== "routine" && trigger !== "bot_message" &&
+    !isBackgroundRunTrigger(trigger) && !isInternalMissionRunTrigger(trigger);
 }
 
 export const TICKET_SILENT_REPLY_GUIDANCE =

@@ -5,6 +5,7 @@ import {
   createStreamingRedactor,
   endsSentence,
   isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
   isConversationalRun,
   noteLastToolStep,
   redactSecrets,
@@ -161,7 +162,8 @@ export async function flushProgress(ctx: RunContext) {
     ctx.scripted ||
     !reply.pendingProgress ||
     run.trigger === "routine" ||
-    isBackgroundRunTrigger(run.trigger)
+    isBackgroundRunTrigger(run.trigger) ||
+    isInternalMissionRunTrigger(run.trigger)
   )
     return;
   await deps.events.append({
@@ -277,7 +279,8 @@ export async function showNarrationStatus(ctx: RunContext, note: string | undefi
     !note ||
     ctx.scripted ||
     !runPromotesMidTurnNarration(run.trigger) ||
-    isBackgroundRunTrigger(run.trigger)
+    isBackgroundRunTrigger(run.trigger) ||
+    isInternalMissionRunTrigger(run.trigger)
   )
     return;
   ctx.state.reply.narrationStatusShowing = true;

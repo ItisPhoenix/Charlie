@@ -14,6 +14,7 @@ import {
   displayName,
   humanizeToolName,
   isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
   redactSecrets,
   redactSecretsAfter,
   TAKEOVER_COMPUTER_PENDING_STATE,
@@ -115,7 +116,7 @@ export async function consumeRunEvents(
   const publishThinking = async (active: boolean) => {
     if (thinking === active) return;
     thinking = active;
-    if (ctx.scripted || isBackgroundRunTrigger(run.trigger)) return;
+    if (ctx.scripted || isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger)) return;
     try {
       await deps.events.append({
         spaceId: run.spaceId,
@@ -274,7 +275,7 @@ async function streamProgress(ctx: RunContext, event: RuntimeEvent<"progress">) 
   const { reply } = ctx.state;
   // Tool status lines are not the model writing.
   if (!event.activity) ctx.state.toolCallStreak = { key: undefined, count: 0 };
-  if (run.trigger === "routine" || isBackgroundRunTrigger(run.trigger)) return;
+  if (run.trigger === "routine" || isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger)) return;
   // The bot's own note stays the working line until it writes again.
   if (event.activity && reply.narrationStatusShowing) return;
   // Flush batched text deltas first so an activity line cannot land

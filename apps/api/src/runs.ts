@@ -3,6 +3,7 @@ import { MessageBlock } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
   BACKGROUND_RUN_TRIGGERS,
+  INTERNAL_MISSION_RUN_TRIGGERS,
   botMessageContext,
   displayName,
   truncatePlainText,
@@ -66,7 +67,7 @@ export async function listSpaceRuns(
       userId: actor.userId,
       bot: { archivedAt: null },
       // Background ticket work belongs on the board, not in the activity list.
-      trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] },
+      trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS, ...INTERNAL_MISSION_RUN_TRIGGERS] },
       ...(filter === "active"
         ? { status: { in: [...ACTIVE_RUN_STATUSES] } }
         : { status: { in: [...TERMINAL_STATUSES] } }),
