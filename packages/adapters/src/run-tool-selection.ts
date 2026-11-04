@@ -14,7 +14,7 @@ import { filterBuiltinToolsForRun, filterBuiltinToolsForThread } from "./schedul
 // Mission assessments consume untrusted specialist reports. Enforce read-only
 // verification at the offered-tool boundary, not merely by telling the model.
 // No credentials, shell, modifications, delegation, or host authority.
-const MISSION_REVIEW_TOOLS = new Set([
+export const MISSION_REVIEW_TOOLS: ReadonlySet<string> = new Set([
   "web_search", "web_fetch", "browser_snapshot",
   "list_files", "read_file", "search_history", "read_history",
   "recall_memory", "mission_status", "computer_observe",

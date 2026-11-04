@@ -7,7 +7,7 @@ import { noteComputerTaskStep } from "./run-progress.js";
 import type { ToolHandler } from "./run-tool-gate.js";
 import { auditToolCall, gateToolCall } from "./run-tool-gate.js";
 import { prepareToolRequest, resolveToolRequest } from "./run-tool-request.js";
-import { PAGE_BROWSER_TOOL_NAMES } from "./run-tool-selection.js";
+import { MISSION_REVIEW_TOOLS, PAGE_BROWSER_TOOL_NAMES } from "./run-tool-selection.js";
 import { computerTools, pageBrowserTool } from "./run-tools-computer.js";
 import { feedbackTools } from "./run-tools-feedback.js";
 import { fileTools } from "./run-tools-files.js";
@@ -80,6 +80,12 @@ async function dispatchTool(
   observer: AgentToolExecutionObserver | undefined,
 ) {
   ctx.context.signal.throwIfAborted();
+  // Internal Chief reviews ingest untrusted agent output. The offered-tool
+  // filter is not sufficient: connector tools can be added dynamically.
+  // Enforce the read-only boundary again at actual execution.
+  if (ctx.run.trigger === "charlie_mission_review" && !MISSION_REVIEW_TOOLS.has(name)) {
+    return { error: "Chief mission review permits only read-only source/observation tools." };
+  }
   if (!strategicInitiativeToolAllowed(name, ctx.run)) {
     return { error: "Daily check-ins can only ask or message the user." };
   }
