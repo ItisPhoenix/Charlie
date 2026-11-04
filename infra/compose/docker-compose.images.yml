@@ -21,6 +21,12 @@ x-app-environment: &app-environment
   REALTIME_DATABASE_URL:
   DB_POOL_MAX:
   DATA_DIR: /data
+  # Charlie-owned mission, source and host-routing settings.
+  CHARLIE_OWNER_CHIEF_BOT_ID:
+  CHARLIE_OWNER_GORDON_BOT_ID:
+  CHARLIE_GORDON_HOST_SOCKET:
+  CHARLIE_SOURCE_REPOSITORY:
+  GITHUB_REPOSITORY:
   ENCRYPTION_KEY:
   ENCRYPTION_MASTER_KEYS:
   MASTER_KEY_PROVIDER:
@@ -412,6 +418,7 @@ services:
       # Sign-in, sessions, billing and inbound webhooks: API only.
       API_HOST: "0.0.0.0"
       API_PORT:
+      CHARLIE_OWNER_SIGNING_KEY_FILE:
       BETTER_AUTH_SECRET:
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://127.0.0.1:5173}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://127.0.0.1:5173}
