@@ -56,8 +56,13 @@ function missionSummary(row: MissionRow, progress: Progress[]): string {
     if (assessment) {
       lines.push("  Chief assessment: " + assessment.slice(0, 700) +
         (assessment.length > 700 ? "…" : ""));
-    } else if (item?.evidence && item.state !== "verified") {
-      lines.push("  Evidence exists but was not verified.");
+    }
+    if (item?.evidence?.trim()) {
+      const evidence = item.evidence.trim();
+      lines.push("  " + (item.state === "verified"
+        ? "Chief-accepted specialist report (runtime validation only if explicitly stated): "
+        : "Unverified specialist report: ") +
+        evidence.slice(0, 1900) + (evidence.length > 1900 ? "…" : ""));
     }
   }
   lines.push("See mission status for the complete recorded evidence and run IDs.");
@@ -367,6 +372,12 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
             "Evaluate the execution outcome. Do not repeat the specialist's research,",
             "commands or automation. Do not execute tools or expand permissions.",
             "Choose ACCEPT only if concrete evidence supports the criteria at this risk level.",
+            "For an explicitly READ-ONLY source review, inspect the cited implementation",
+            "claims, source identifiers, and proposed reproduction/expected assertions.",
+            "Such a review does NOT require executing a test unless the criteria demand it.",
+            "Do not convert source-supported conclusions into claims of runtime validation.",
+            "RETRY only if a recoverable criterion is actually missing; do not retry solely",
+            "because a requested read-only review was not executed as a runtime test.",
             "If the supplied evidence contains EVIDENCE_TRUNCATED, it is incomplete;",
             "do not accept it as a complete mission deliverable.",
             "Choose RETRY for a recoverable evidence or execution gap.",
@@ -408,9 +419,14 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
               verifierBotId: spec.verifierBotId, verifierRunId: runId };
             scheduled.push(runId);
             changed = true;
+          } else {
+            next[position] = { ...current, state: "blocked",
+              chiefEvidence: (current.chiefEvidence ?? "") +
+                "\\nIndependent verifier was unavailable; no review was performed." };
+            changed = true;
           }
         }
-        // Without a reviewer, escalation awaits an explicit owner review request.
+        // Missing verifier after escalation is a terminal blocker, not infinite waiting.
       }
       if (next[position]?.state === "verifying") {
         const assessment = next[position]!;
@@ -430,7 +446,8 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
                 state: verdict === "MISSION_CHIEF_ACCEPT" ? "verified" :
                   verdict === "MISSION_CHIEF_RETRY"
                     ? (assessment.attempts < spec.maxAttempts && !deadlineExpired ? "planned" : "failed") :
-                  verdict === "MISSION_CHIEF_ESCALATE" ? "submitted" : "blocked",
+                  verdict === "MISSION_CHIEF_ESCALATE" && spec.verifierBotId
+                    ? "submitted" : "blocked",
                 chiefRunId: chief.id,
                 chiefDecision: verdict === "MISSION_CHIEF_ACCEPT" ? "accept" :
                   verdict === "MISSION_CHIEF_RETRY" ? "retry" :
@@ -466,6 +483,20 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
             changed = true;
           }
         }
+      }
+    }
+
+    // The runtime budget bounds reconciliation too. Previously expired
+    // submitted/reviewing/running states could remain nonterminal forever.
+    // We cannot assert that an already running external effect stopped here.
+    if (deadlineExpired) {
+      for (let i = 0; i < next.length; i++) {
+        const item = next[i]!;
+        if (["verified", "failed", "blocked", "cancelled"].includes(item.state)) continue;
+        next[i] = { ...item, state: "blocked",
+          chiefEvidence: (item.chiefEvidence ?? "") +
+            "\\nMission deadline exceeded; any already-running external work may still be active and requires reconciliation." };
+        changed = true;
       }
     }
 

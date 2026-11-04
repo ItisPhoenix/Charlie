@@ -73,6 +73,9 @@ export const messagingTools: ToolHandlers = {
   },
   async message_user(ctx, call) {
     const { deps, run } = ctx;
+    if (run.trigger === "user" && ctx.bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
+      return call.finish({ error: "Chief sends one acknowledgement after mission activation; do not post interim progress messages." });
+    }
     if (isInternalMissionRunTrigger(run.trigger)) {
       return call.finish({ error: "Internal mission runs save their result to the mission ledger; owner progress messages are unavailable." });
     }
@@ -120,17 +123,13 @@ export const messagingTools: ToolHandlers = {
       });
     }
     const { args, effectKey } = call;
-    // An owner-originated mission uses the durable coordinator. Ordinary peer
-    // messages here create a second delegation and repeatedly wake Chief.
+    // Chief owner turns always delegate through the mission ledger.
+    // The former pre-creation exception caused an extra bot_message run and
+    // an unsolicited follow-up reply on the owner-facing thread.
     if (run.trigger === "user" &&
         bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
-      const active = await deps.prisma.$queryRawUnsafe<Array<{ id: string }>>(
-        'SELECT "id" FROM "charlie_missions" WHERE "originRunId"=$1 ' +
-          'AND "spaceId"=$2 AND "userId"=$3 AND "chiefBotId"=$4 LIMIT 1',
-        run.id, run.spaceId, run.userId, bot.id,
-      );
-      if (active.length > 0) return call.finish({
-        error: "This owner request already activated a Charlie mission. Do not send separate bot messages; the durable mission coordinator handles delegation and retries.",
+      return call.finish({
+        error: "Use mission_create followed by mission_dispatch. The durable mission runner handles all delegation, retries and final reporting; direct message_bot is not a mission dispatch.",
       });
     }
     const sent = await messageBot(

@@ -3,7 +3,7 @@ import {
   FLEET_TOOL_NAMES,
   FLEET_WRITE_TOOL_NAMES,
 } from "@rakazo/contracts";
-import { isBackgroundRunTrigger, isOwnerStartedRun } from "@rakazo/core";
+import { isBackgroundRunTrigger, isInternalMissionRunTrigger, isOwnerStartedRun } from "@rakazo/core";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { selectMemoryTools } from "./memory-tools.js";
@@ -124,6 +124,8 @@ export function selectBuiltinToolsForRun(options: {
           "generate_image",
           "generate_video",
         ].includes(tool.name)) &&
+      (!isInternalMissionRunTrigger(options.trigger) ||
+        !["message_user", "message_bot", "message_agent", "handoff_to_bot", "call_user"].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.userComputer || tool.name !== "user_computer_shell") &&
       ((options.userComputer && options.userComputerScreen) ||

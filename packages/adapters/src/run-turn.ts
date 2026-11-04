@@ -275,7 +275,9 @@ async function streamProgress(ctx: RunContext, event: RuntimeEvent<"progress">) 
   const { reply } = ctx.state;
   // Tool status lines are not the model writing.
   if (!event.activity) ctx.state.toolCallStreak = { key: undefined, count: 0 };
-  if (run.trigger === "routine" || isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger)) return;
+  if (run.trigger === "routine" || isBackgroundRunTrigger(run.trigger) ||
+      isInternalMissionRunTrigger(run.trigger) ||
+      (run.trigger === "user" && bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID)) return;
   // The bot's own note stays the working line until it writes again.
   if (event.activity && reply.narrationStatusShowing) return;
   // Flush batched text deltas first so an activity line cannot land
@@ -792,15 +794,44 @@ export async function completeRun(ctx: RunContext) {
       skipEmptyFallback: reply.publishedTerminalSubagent || reply.publishedMidTurnUserMessage,
     });
   }
-  const blocks = ctx.state.handedOff
-    ? []
-    : finalBlocksAfterMidTurnProgress(
-        redactBlocks(completionBlocks, ctx.secrets),
-        reply.publishedMidTurnUserMessage || runAllowsSilentEmpty(run.trigger),
-      );
+  // A mission-owning Chief turn acknowledges the durable work, never publishes
+  // its speculative interim research as an apparently finished user answer.
+  // The reconciler is solely responsible for the final outcome message.
+  const missionRows = run.trigger === "user" &&
+      bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID &&
+      ctx.source.ownerStartedRun
+    ? await deps.prisma.$queryRawUnsafe<Array<{
+        id: string; progress: unknown;
+      }>>(
+        'SELECT "id","progress" FROM "charlie_missions" ' +
+        'WHERE "originRunId"=$1 AND "spaceId"=$2 AND "userId"=$3 ' +
+        'AND "chiefBotId"=$4 ORDER BY "createdAt" DESC LIMIT 1',
+        run.id, run.spaceId, run.userId, bot.id,
+      )
+    : [];
+  const mission = missionRows[0];
+  const missionProgress = mission
+    ? typeof mission.progress === "string" ? JSON.parse(mission.progress) : mission.progress
+    : [];
+  const started = Array.isArray(missionProgress) && missionProgress.length > 0;
+  const acknowledgement = mission
+    ? "Mission " + mission.id +
+      (started
+        ? " is active. Specialist delegation and Chief evaluation run internally; the final evidence-based result will appear here."
+        : " was created but is not dispatched. No delegated work has started.")
+    : null;
+  const blocks = acknowledgement && !ctx.state.handedOff
+    ? [{ kind: "text" as const, text: acknowledgement }]
+    : ctx.state.handedOff
+      ? []
+      : finalBlocksAfterMidTurnProgress(
+          redactBlocks(completionBlocks, ctx.secrets),
+          reply.publishedMidTurnUserMessage || runAllowsSilentEmpty(run.trigger),
+        );
   const text = ctx.state.handedOff
     ? ""
-    : redactSecrets(completionNotificationBody(silentReply.assembled, blocks), ctx.secrets);
+    : redactSecrets(acknowledgement ??
+        completionNotificationBody(silentReply.assembled, blocks), ctx.secrets);
   if (containsSecret(text, ctx.secrets)) {
     throw new Error("refusing to persist a secret in the thread");
   }
@@ -809,6 +840,7 @@ export async function completeRun(ctx: RunContext) {
   // failure, not a successful delegated summary.
   if (
     !ctx.state.handedOff &&
+    !acknowledgement &&
     !silentReply.assembled.trim() &&
     emptyDelegatedToolTurnShouldFail(completionBlocks)
   ) {
@@ -863,7 +895,7 @@ export async function completeRun(ctx: RunContext) {
     ).catch((error) => getLogger().error("bot message result return", error));
   }
   const notifyBody = completionNotificationPreview(text);
-  if (runSendsFinishNotification(run.trigger) && notifyBody && !completed.continuationRunId) {
+  if (!acknowledgement && runSendsFinishNotification(run.trigger) && notifyBody && !completed.continuationRunId) {
     await notifyRun(deps, run, {
       kind: "completion",
       title: `${displayName(bot.name, "Bot")} finished`,
