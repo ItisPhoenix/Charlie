@@ -1371,7 +1371,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "schedule_create",
     description:
-      'Create a reminder or recurring job for this bot. Use for "remind me in 10 minutes" or "every morning send a joke". Repeats: cron or every/unit (min 1 minute), optionally from startAt. One-shot: runAt, delayMinutes, or delaySeconds. A repeating job carries out the user\'s lasting request each time, not a copy of what was decided today.',
+      "Create a reminder (runAt/delayMinutes/delaySeconds) or recurring job (cron or every/unit, minimum 1 minute, optional startAt). Repeats execute the original request each time.",
     inputSchema: scheduleCreateInputSchema,
   },
   {
@@ -1454,7 +1454,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "skill_read",
     description:
-      "Load a Claude Agent Skill (SKILL.md recipe) by exact name. Call this when a catalog skill matches the user's request, then follow it immediately. When the result lists files, read one by calling again with its path in file.",
+      "Read a named SKILL.md skill. Call again with file to read linked references, then follow the skill instructions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1522,7 +1522,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a temporary helper inside this turn; it has no saved bot, chat or computer. If the user wants a persistent bot, use spawn_bot instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1607,7 +1607,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "update_bot",
     description:
-      "Read or change your own settings. Call with no fields to read them and the models and thinking levels you can pick. Pass fields to change them, only when the user asks; setting your name, description and first instructions when you have none is fine. Never claim a change without calling this.",
+      "Read your bot settings with no fields, including available models and thinking levels. Change settings only when the user requests, except initial setup. Never claim changes without calling this.",
     inputSchema: {
       type: "object",
       properties: {
