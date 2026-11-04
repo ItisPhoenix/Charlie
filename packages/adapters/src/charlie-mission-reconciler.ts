@@ -305,14 +305,22 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
     );
     if (!rows.length) return { scheduled: [], notices: [] };
     const row = decode(rows[0]!);
-    // Do not auto-start newly created plans before the original authenticated
-    // owner-originated run has explicitly dispatched their first stage.
-    if (!row.progress.length) return { scheduled: [], notices: [] };
+    // Do not auto-start newly created plans before the authenticated owner
+    // activates them. Once the budget expires, however, a never-activated
+    // mission must become a durable terminal blocker rather than disappear.
     const deadlineExpired =
       now.getTime() >= row.createdAt.getTime() + row.plan.maxRuntimeSeconds * 1000;
-    const next: Progress[] = [...row.progress];
+    if (!row.progress.length && !deadlineExpired) {
+      return { scheduled: [], notices: [] };
+    }
+    const next: Progress[] = row.progress.length
+      ? [...row.progress]
+      : row.plan.work.map((work) => ({
+          key: work.key, state: "blocked" as const, attempts: 0,
+          evidence: "Mission expired before owner activation and dispatch.",
+        }));
     const scheduled: string[] = [];
-    let changed = false;
+    let changed = row.progress.length === 0;
     const notices: MissionNotice[] = [];
 
     for (const spec of row.plan.work) {
@@ -422,7 +430,7 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
           } else {
             next[position] = { ...current, state: "blocked",
               chiefEvidence: (current.chiefEvidence ?? "") +
-                "\\nIndependent verifier was unavailable; no review was performed." };
+                "\nIndependent verifier was unavailable; no review was performed." };
             changed = true;
           }
         }
@@ -495,7 +503,7 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
         if (["verified", "failed", "blocked", "cancelled"].includes(item.state)) continue;
         next[i] = { ...item, state: "blocked",
           chiefEvidence: (item.chiefEvidence ?? "") +
-            "\\nMission deadline exceeded; any already-running external work may still be active and requires reconciliation." };
+            "\nMission deadline exceeded; any already-running external work may still be active and requires reconciliation." };
         changed = true;
       }
     }
