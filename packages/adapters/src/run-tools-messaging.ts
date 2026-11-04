@@ -115,6 +115,19 @@ export const messagingTools: ToolHandlers = {
   async message_bot(ctx, call) {
     const { deps, run, bot } = ctx;
     const { args, effectKey } = call;
+    // An owner-originated mission uses the durable coordinator. Ordinary peer
+    // messages here create a second delegation and repeatedly wake Chief.
+    if (run.trigger === "user" &&
+        bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
+      const active = await deps.prisma.$queryRawUnsafe<Array<{ id: string }>>(
+        'SELECT "id" FROM "charlie_missions" WHERE "originRunId"=$1 ' +
+          'AND "spaceId"=$2 AND "userId"=$3 AND "chiefBotId"=$4 LIMIT 1',
+        run.id, run.spaceId, run.userId, bot.id,
+      );
+      if (active.length > 0) return call.finish({
+        error: "This owner request already activated a Charlie mission. Do not send separate bot messages; the durable mission coordinator handles delegation and retries.",
+      });
+    }
     const sent = await messageBot(
       deps,
       { ...run, sourceMessageId: run.sourceMessageId },

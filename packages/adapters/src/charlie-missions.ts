@@ -258,9 +258,9 @@ export async function missionStatus(ctx: RunContext, args: Record<string, unknow
 }
 
 /**
- * Send exactly one bot message per mission work item. messageBot persists
- * the child run and clientNonce atomically; retries reuse the same delivery
- * key, even after a crash before our progress update.
+ * Owner-authorized activation only. Durable background reconciliation creates
+ * first-stage child runs just as it creates retries; no bot_message relay,
+ * sender receipt, or waking Chief chat is needed.
  */
 export async function missionDispatch(ctx: RunContext, args: Record<string, unknown>) {
   if (!(await ownerAuthorized(ctx))) {
@@ -268,72 +268,39 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
   }
   const id = stringValue(args.missionId, 128);
   if (!id) return { error: "missionId is required." };
-  let row = await findMission(ctx, id);
+  const row = await findMission(ctx, id);
   if (!row || row.chiefBotId !== ctx.bot.id) {
     return { error: "Mission not found or not owned by this coordinator." };
   }
   if (Date.now() >= row.createdAt.getTime() + row.plan.maxRuntimeSeconds * 1000) {
-    return { error: "Mission deadline expired. No further delegation was sent." };
+    return { error: "Mission deadline expired. No further delegation was scheduled." };
   }
-
-  const dispatched: string[] = [];
-  const initial = decideCharlieMissionWork(row.plan, row.progress);
-  for (const key of initial.ready) {
-    const spec = row.plan.work.find((item) => item.key === key)!;
-    const message = [
-      "Charlie mission " + row.id + ", work " + spec.key + ".",
-      "Goal: " + row.plan.goal,
-      "Task: " + spec.title,
-      "Verification criteria: " + spec.verificationCriteria,
-      "Execute within your authority. Return concrete evidence, uncertainty and blockers.",
-      "Do not claim that Charlie has verified completion.",
-    ];
-    const dependency = verifiedDependencyContext(row.plan, row.progress, key);
-    if (!dependency.ok) return { error: dependency.error, dispatched };
-    if (dependency.context) message.push(dependency.context);
-    const fullMessage = message.join("\n");
-    if (fullMessage.length > BOT_MESSAGE_MAX_LENGTH) {
-      return { error: "Delegation exceeds the bot-message size limit.", dispatched };
-    }
-    const attempt = (row.progress.find((item) => item.key === key)?.attempts ?? 0) + 1;
-
-    const sent = await messageBot(
-      ctx.deps,
-      { ...ctx.run, sourceMessageId: ctx.run.sourceMessageId },
-      { id: ctx.bot.id, name: ctx.bot.name },
-      {
-        bot_id: spec.assigneeBotId,
-        message: fullMessage,
-        intent: "request",
-        deliveryKey: deliveryKey(row.id, key, attempt),
-      },
-    );
-    if (!sent.ok) {
-      return { error: sent.error, dispatched, retrySafe: true };
-    }
-
-    const old = row.progress.find((item) => item.key === key);
-    const next: Progress[] = [
-      ...row.progress.filter((item) => item.key !== key),
-      { key, state: "queued", attempts: attempt },
-    ];
-    const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
-      'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
-        '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
-        'AND "revision"=$5 RETURNING *',
-      JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
-    );
-    if (!updated.length) {
-      return {
-        error: "Concurrent mission change; reread mission_status and retry.",
-        dispatched,
-        retrySafe: true,
-      };
-    }
-    row = parseRow(updated[0]!);
-    dispatched.push(key);
+  if (row.progress.length > 0) {
+    // An existing mission must not be reactivated or cause duplicate handoffs.
+    return { ok: true, alreadyActivated: true, dispatched: [], ...rowView(row) };
   }
-  return { ok: true, dispatched, ...rowView(row) };
+  const initial = decideCharlieMissionWork(row.plan, []);
+  if (!initial.ready.length) return { error: "No ready work exists." };
+  const progress: Progress[] = row.plan.work.map((item) => ({
+    key: item.key, state: "planned", attempts: 0,
+  }));
+  const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+    'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
+      '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
+      'AND "revision"=$5 AND "progress"=\'[]\'::jsonb RETURNING *',
+    JSON.stringify(progress), row.id, row.spaceId, row.userId, row.revision,
+  );
+  if (!updated.length) return {
+    error: "Mission activation raced another request; read mission_status.",
+    retrySafe: true,
+  };
+  return {
+    ok: true,
+    scheduled: initial.ready,
+    dispatched: initial.ready,
+    ...rowView(parseRow(updated[0]!)),
+    note: "Mission activated. The durable reconciler dispatches work internally and retries automatically; do not separately message specialists.",
+  };
 }
 
 /**

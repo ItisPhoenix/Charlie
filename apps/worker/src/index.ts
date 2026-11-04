@@ -365,7 +365,7 @@ async function main() {
       lookup: deploymentModelUsageLookup(),
     }),
     reconcileStrategicInitiatives: createStrategicInitiativeReconciler({ prisma, jobs }),
-    reconcileCharlieMissions: createCharlieMissionReconciler({ prisma, jobs }),
+    reconcileCharlieMissions: createCharlieMissionReconciler({ prisma, jobs, events }),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcilePurchases: () => reconcilePurchases({ prisma, jobs, paymentWallet }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
