@@ -22,8 +22,12 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
  * Background runs never promote it.
  */
 export function runPromotesMidTurnNarration(trigger: string): boolean {
-  return trigger !== "routine" && trigger !== "bot_message" &&
-    !isBackgroundRunTrigger(trigger) && !isInternalMissionRunTrigger(trigger);
+  return (
+    trigger !== "routine" &&
+    trigger !== "bot_message" &&
+    !isBackgroundRunTrigger(trigger) &&
+    !isInternalMissionRunTrigger(trigger)
+  );
 }
 
 export const TICKET_SILENT_REPLY_GUIDANCE =

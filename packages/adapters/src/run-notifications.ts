@@ -64,7 +64,8 @@ export async function notifyRun(
   if (
     !deps.notifications ||
     ((isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger)) &&
-      message.kind !== "help" && message.kind !== "takeover")
+      message.kind !== "help" &&
+      message.kind !== "takeover")
   )
     return;
   const routineId = message.kind === "failure" ? run.routineId : null;
@@ -106,8 +107,11 @@ export async function notifyRun(
 }
 
 export function runSendsFinishNotification(trigger: string): boolean {
-  return trigger !== "created" && !isBackgroundRunTrigger(trigger) &&
-    !isInternalMissionRunTrigger(trigger);
+  return (
+    trigger !== "created" &&
+    !isBackgroundRunTrigger(trigger) &&
+    !isInternalMissionRunTrigger(trigger)
+  );
 }
 
 /** User-facing text for completion notifications; empty when only tool/step activity remains. */

@@ -3,7 +3,11 @@ import {
   FLEET_TOOL_NAMES,
   FLEET_WRITE_TOOL_NAMES,
 } from "@rakazo/contracts";
-import { isBackgroundRunTrigger, isInternalMissionRunTrigger, isOwnerStartedRun } from "@rakazo/core";
+import {
+  isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
+  isOwnerStartedRun,
+} from "@rakazo/core";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { selectMemoryTools } from "./memory-tools.js";
@@ -15,9 +19,19 @@ import { filterBuiltinToolsForRun, filterBuiltinToolsForThread } from "./schedul
 // verification at the offered-tool boundary, not merely by telling the model.
 // No credentials, shell, modifications, delegation, or host authority.
 export const MISSION_REVIEW_TOOLS: ReadonlySet<string> = new Set([
-  "web_search", "web_fetch", "github_source_list", "github_source_find", "github_source_read", "browser_snapshot",
-  "list_files", "read_file", "search_history", "read_history",
-  "recall_memory", "mission_status", "computer_observe",
+  "web_search",
+  "web_fetch",
+  "github_source_list",
+  "github_source_find",
+  "github_source_read",
+  "browser_snapshot",
+  "list_files",
+  "read_file",
+  "search_history",
+  "read_history",
+  "recall_memory",
+  "mission_status",
+  "computer_observe",
 ]);
 
 export const READ_ONLY_AGENT_TOOLS = new Set([
@@ -122,7 +136,15 @@ export function selectBuiltinToolsForRun(options: {
       (!FLEET_TOOL_NAMES_SET.has(tool.name) ||
         (Boolean(options.fleetManagement) && ownerStartedRun)) &&
       (ownerStartedRun || (tool.name !== "update_preferences" && tool.name !== "feedback")) &&
-      (ownerStartedRun || !["mission_create", "mission_dispatch", "mission_submit", "mission_reconcile", "mission_request_review", "mission_finalize_review"].includes(tool.name)) &&
+      (ownerStartedRun ||
+        ![
+          "mission_create",
+          "mission_dispatch",
+          "mission_submit",
+          "mission_reconcile",
+          "mission_request_review",
+          "mission_finalize_review",
+        ].includes(tool.name)) &&
       (options.paymentWalletEnabled || !PURCHASE_TOOL_NAMES.has(tool.name)) &&
       (options.mediaImagesEnabled || tool.name !== "generate_image") &&
       (options.mediaVideoEnabled || tool.name !== "generate_video") &&
@@ -138,7 +160,9 @@ export function selectBuiltinToolsForRun(options: {
           "generate_video",
         ].includes(tool.name)) &&
       (!isInternalMissionRunTrigger(options.trigger) ||
-        !["message_user", "message_bot", "message_agent", "handoff_to_bot", "call_user"].includes(tool.name)) &&
+        !["message_user", "message_bot", "message_agent", "handoff_to_bot", "call_user"].includes(
+          tool.name,
+        )) &&
       // Specialists execute one assigned work item. They do not coordinate
       // mission state, so expose mission status only to Chief/owner turns
       // and assessment runs, not the task-execution subrun itself.

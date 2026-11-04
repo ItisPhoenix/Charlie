@@ -55,9 +55,7 @@ export async function executeSubagent(
   if (
     !Array.isArray(requestedTools) ||
     requestedTools.length > 12 ||
-    requestedTools.some(
-      (name) => typeof name !== "string" || !name.trim() || name.length > 128,
-    )
+    requestedTools.some((name) => typeof name !== "string" || !name.trim() || name.length > 128)
   ) {
     return "Subagent refused: invalid tool selection.";
   }
@@ -141,9 +139,7 @@ export async function executeSubagent(
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
 
-  const childDefs = [...new Set(requestedTools)].map(
-    (name) => availableTools.get(name)!,
-  );
+  const childDefs = [...new Set(requestedTools)].map((name) => availableTools.get(name)!);
   const nestedHost: ToolHost = {
     ...host,
     activeModel: {

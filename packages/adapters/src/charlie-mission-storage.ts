@@ -1,7 +1,5 @@
-import {
-  ciphertextKeyId, contentEncryptionOf, decryptText, encryptText,
-} from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
+import { ciphertextKeyId, contentEncryptionOf, decryptText, encryptText } from "@rakazo/db";
 
 /**
  * Mission plan and progress are raw SQL JSONB columns, so Prisma's normal
@@ -21,8 +19,13 @@ function parse(value: unknown): unknown {
 
 export function missionColumnSealed(value: unknown): boolean {
   const data = parse(value);
-  return !!data && typeof data === "object" && !Array.isArray(data) &&
-    Object.keys(data).length === 1 && typeof (data as { $sealed?: unknown }).$sealed === "string";
+  return (
+    !!data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Object.keys(data).length === 1 &&
+    typeof (data as { $sealed?: unknown }).$sealed === "string"
+  );
 }
 
 function ringFor(prisma: PrismaClient) {
@@ -35,12 +38,18 @@ function ringFor(prisma: PrismaClient) {
 
 function location(row: Identity, column: Column) {
   return {
-    table: "charlie_missions", column, rowId: row.id, owner: row.userId,
+    table: "charlie_missions",
+    column,
+    rowId: row.id,
+    owner: row.userId,
   };
 }
 
 export async function sealMissionColumn(
-  prisma: PrismaClient, row: Identity, column: Column, value: unknown,
+  prisma: PrismaClient,
+  row: Identity,
+  column: Column,
+  value: unknown,
 ): Promise<string> {
   const key = await ringFor(prisma).current(row.spaceId);
   const ciphertext = encryptText(key, location(row, column), JSON.stringify(value));
@@ -48,11 +57,13 @@ export async function sealMissionColumn(
 }
 
 async function openMissionColumn(
-  prisma: PrismaClient, row: Identity, column: Column, value: unknown,
+  prisma: PrismaClient,
+  row: Identity,
+  column: Column,
+  value: unknown,
 ): Promise<unknown> {
   const data = parse(value);
-  if (!data || typeof data !== "object" || Array.isArray(data) ||
-      !Object.prototype.hasOwnProperty.call(data, "$sealed")) {
+  if (!data || typeof data !== "object" || Array.isArray(data) || !Object.hasOwn(data, "$sealed")) {
     return data; // Legacy row: the leader reconciler seals it under row lock.
   }
   if (!missionColumnSealed(data)) throw new Error("Invalid sealed mission column");
@@ -66,9 +77,7 @@ async function openMissionColumn(
   return JSON.parse(decryptText(key, location(row, column), ciphertext));
 }
 
-export async function openMissionRow<T extends Stored>(
-  prisma: PrismaClient, row: T,
-): Promise<T> {
+export async function openMissionRow<T extends Stored>(prisma: PrismaClient, row: T): Promise<T> {
   const [plan, progress] = await Promise.all([
     openMissionColumn(prisma, row, "plan", row.plan),
     openMissionColumn(prisma, row, "progress", row.progress),

@@ -180,10 +180,10 @@ import {
 import { createMessagingReceipts } from "./messaging-receipts.js";
 import { mountMessagingWebhookRoutes } from "./messaging-webhook.js";
 import { monitoringRoutes } from "./monitoring.js";
+import { issueGordonCommandGrant } from "./owner-command.js";
 import { pluginSubmissionRoutes } from "./plugin-submissions.js";
 import { sendReferralEmails, startReferralEmails } from "./referral-email.js";
 import { mountApiRequestBodyLimits, rpcBodyLimit } from "./request-body-limit.js";
-import { issueGordonCommandGrant } from "./owner-command.js";
 import { createRouter } from "./router.js";
 import { mountScreenTarget } from "./screen-proxy.js";
 import { createAuthResponseAudit } from "./security-audit.js";
@@ -975,12 +975,10 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     if (!file) return c.json({ error: "disabled" }, 503);
 
     const candidate = c.req.header("x-charlie-worker-key") ?? "";
-    if (!candidate || candidate.length > 256)
-      return c.json({ error: "unauthorized" }, 403);
+    if (!candidate || candidate.length > 256) return c.json({ error: "unauthorized" }, 403);
 
     const key = readFileSync(file, "utf8").trim();
-    const digest = (value: string) =>
-      createHash("sha256").update(value, "utf8").digest();
+    const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
 
     if (!timingSafeEqual(digest(candidate), digest(key)))
       return c.json({ error: "unauthorized" }, 403);

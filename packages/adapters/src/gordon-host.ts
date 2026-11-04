@@ -18,55 +18,48 @@ export async function executeGordonHostCommand(input: {
   const socketPath = process.env.CHARLIE_GORDON_HOST_SOCKET;
   const keyPath = process.env.CHARLIE_OWNER_WORKER_KEY_FILE;
 
-  if (!socketPath || !keyPath)
-    return { error: "Ubuntu host control is not configured" };
+  if (!socketPath || !keyPath) return { error: "Ubuntu host control is not configured" };
 
   if (!input.command || Buffer.byteLength(input.command, "utf8") > 8192)
     return { error: "Invalid host command length" };
 
   const key = readFileSync(keyPath, "utf8").trim();
 
-  const response = await fetch(
-    "http://api:3100/api/internal/charlie/authorize",
-    {
-      method: "POST",
-      signal: AbortSignal.timeout(12000),
-      headers: {
-        "content-type": "application/json",
-        "x-charlie-worker-key": key,
-      },
-      body: JSON.stringify({
-        gordon_run_id: input.runId,
-        effect_id: input.effectId,
-        command: input.command,
-      }),
+  const response = await fetch("http://api:3100/api/internal/charlie/authorize", {
+    method: "POST",
+    signal: AbortSignal.timeout(12000),
+    headers: {
+      "content-type": "application/json",
+      "x-charlie-worker-key": key,
     },
-  );
+    body: JSON.stringify({
+      gordon_run_id: input.runId,
+      effect_id: input.effectId,
+      command: input.command,
+    }),
+  });
 
-  if (!response.ok)
-    return { error: `Host authority denied (HTTP ${response.status})` };
+  if (!response.ok) return { error: `Host authority denied (HTTP ${response.status})` };
 
-  const envelope = await response.json() as Record<string, unknown>;
+  const envelope = (await response.json()) as Record<string, unknown>;
 
-  if (
-    typeof envelope.grant_b64 !== "string" ||
-    typeof envelope.signature_b64 !== "string"
-  ) return { error: "Invalid host authorization" };
+  if (typeof envelope.grant_b64 !== "string" || typeof envelope.signature_b64 !== "string")
+    return { error: "Invalid host authorization" };
 
   return await new Promise<HostResponse>((resolve, reject) => {
     let output = "";
     let finished = false;
     const socket = createConnection({ path: socketPath });
 
-    socket.setTimeout(85000, () =>
-      socket.destroy(new Error("Host execution timed out")),
-    );
+    socket.setTimeout(85000, () => socket.destroy(new Error("Host execution timed out")));
 
     socket.on("connect", () => {
-      socket.write(JSON.stringify({
-        command: input.command,
-        grant: envelope,
-      }) + "\n");
+      socket.write(
+        JSON.stringify({
+          command: input.command,
+          grant: envelope,
+        }) + "\n",
+      );
     });
 
     socket.on("data", (chunk: Buffer) => {

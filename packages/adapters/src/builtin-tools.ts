@@ -769,15 +769,29 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "github_source_list",
-    description: "Read-only source directory listing at the deployed revision. Large directories are paginated: use filter or nextOffset to see remaining files. Use github_source_find to locate matching source paths across the entire repository.",
+    description:
+      "Read-only source directory listing at the deployed revision. Large directories are paginated: use filter or nextOffset to see remaining files. Use github_source_find to locate matching source paths across the entire repository.",
     inputSchema: {
       type: "object",
       properties: {
-        repository: { type: "string", description: "Optional owner/repo; defaults to configured source repository." },
-        commit: { type: "string", description: "Optional exact revision; resolves automatically when omitted." },
-        path: { type: "string", description: "Directory path relative to repository root; omit for root" },
+        repository: {
+          type: "string",
+          description: "Optional owner/repo; defaults to configured source repository.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; resolves automatically when omitted.",
+        },
+        path: {
+          type: "string",
+          description: "Directory path relative to repository root; omit for root",
+        },
         filter: { type: "string", description: "Optional filename/path substring filter" },
-        offset: { type: "integer", minimum: 0, description: "Page offset returned as nextOffset (default 0)." },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Page offset returned as nextOffset (default 0).",
+        },
       },
       required: [],
     },
@@ -785,15 +799,32 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "github_source_find",
-    description: "Search for source file and directory paths across a public GitHub repository, pinned automatically to the configured revision. Matches filenames/paths, not file content. Use for locating relevant implementation files without a giant directory listing.",
+    description:
+      "Search for source file and directory paths across a public GitHub repository, pinned automatically to the configured revision. Matches filenames/paths, not file content. Use for locating relevant implementation files without a giant directory listing.",
     inputSchema: {
       type: "object",
       properties: {
-        repository: { type: "string", description: "Optional owner/repo. Defaults to deployment source." },
-        commit: { type: "string", description: "Optional exact revision; defaults to the deployed revision." },
-        query: { type: "string", description: "Two or more characters describing the filename or path to find." },
-        directory: { type: "string", description: "Optional repository-relative directory to narrow results." },
-        offset: { type: "integer", minimum: 0, description: "Pagination offset from a previous result." },
+        repository: {
+          type: "string",
+          description: "Optional owner/repo. Defaults to deployment source.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; defaults to the deployed revision.",
+        },
+        query: {
+          type: "string",
+          description: "Two or more characters describing the filename or path to find.",
+        },
+        directory: {
+          type: "string",
+          description: "Optional repository-relative directory to narrow results.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Pagination offset from a previous result.",
+        },
       },
       required: ["query"],
     },
@@ -801,16 +832,32 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "github_source_read",
-    description: "Read a public GitHub file with numbered lines. Repository/revision default to configured source. Exact known file paths can be read directly without listing. The response reports the immutable source revision.",
+    description:
+      "Read a public GitHub file with numbered lines. Repository/revision default to configured source. Exact known file paths can be read directly without listing. The response reports the immutable source revision.",
     inputSchema: {
       type: "object",
       properties: {
-        repository: { type: "string", description: "Optional owner/repo; defaults to configured source repository." },
-        commit: { type: "string", description: "Optional exact revision; resolves automatically when omitted." },
+        repository: {
+          type: "string",
+          description: "Optional owner/repo; defaults to configured source repository.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; resolves automatically when omitted.",
+        },
         path: { type: "string", description: "File path from github_source_list" },
         startLine: { type: "integer", minimum: 1, description: "First line to show (default 1)" },
-        lineCount: { type: "integer", minimum: 1, maximum: 200, description: "Lines to show (default 120)" },
-        find: { type: "string", description: "Optional text to locate within a long source file; returns matching line numbers and starts near the first match unless startLine was provided." },
+        lineCount: {
+          type: "integer",
+          minimum: 1,
+          maximum: 200,
+          description: "Lines to show (default 120)",
+        },
+        find: {
+          type: "string",
+          description:
+            "Optional text to locate within a long source file; returns matching line numbers and starts near the first match unless startLine was provided.",
+        },
       },
       required: ["path"],
     },
@@ -1115,7 +1162,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_create",
-    description: "Create and dispatch a bounded executive mission from the owner's ordinary goal. Each work item must be an independently completable assignment with its OWN concrete criteria; a specialist must never be responsible for starting, completing or verifying another work item. The durable executive runtime releases dependencies. Select completionPolicy=report for source analysis, explanations, research and other informational deliverables; this records report delivery, not independently verified truth. Select completionPolicy=review when an external action or outcome requires further assessment. Do not add redundant AI reviewers, hidden approvals, or invented dependencies. Persist plan and dispatch once.",
+    description:
+      "Create and dispatch a bounded executive mission from the owner's ordinary goal. Each work item must be an independently completable assignment with its OWN concrete criteria; a specialist must never be responsible for starting, completing or verifying another work item. The durable executive runtime releases dependencies. Select completionPolicy=report for source analysis, explanations, research and other informational deliverables; this records report delivery, not independently verified truth. Select completionPolicy=review when an external action or outcome requires further assessment. Do not add redundant AI reviewers, hidden approvals, or invented dependencies. Persist plan and dispatch once.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1123,20 +1171,44 @@ export const builtinAgentTools: ConnectorTool[] = [
         maxConcurrentAgents: { type: "integer", minimum: 1, maximum: 8 },
         maxRuntimeSeconds: { type: "integer", minimum: 60, maximum: 86400 },
         work: {
-          type: "array", minItems: 1, maxItems: 40,
+          type: "array",
+          minItems: 1,
+          maxItems: 40,
           items: {
             type: "object",
             properties: {
               key: { type: "string", description: "Unique lowercase key (3-64 characters)." },
               title: { type: "string", maxLength: 200 },
               assigneeBotId: { type: "string" },
-              verifierBotId: { type: "string", description: "Optional different specialist responsible for independent evidence review." },
+              verifierBotId: {
+                type: "string",
+                description:
+                  "Optional different specialist responsible for independent evidence review.",
+              },
               dependsOn: { type: "array", items: { type: "string" } },
-              verificationCriteria: { type: "string", maxLength: 2000, description: "Criteria achievable by THIS assignee alone. Require evidence for the individual deliverable, not running/releasing dependent tasks or completing the whole mission. Do not confuse source inspection with proof of actual runtime behavior." },
-              completionPolicy: { type: "string", enum: ["report", "review"], description: "Required for each task. report for read-only informational findings, including researched or source-supported reports. review for modifying/consequential actions or independently assessed outcomes. Delivery is not factual verification." },
+              verificationCriteria: {
+                type: "string",
+                maxLength: 2000,
+                description:
+                  "Criteria achievable by THIS assignee alone. Require evidence for the individual deliverable, not running/releasing dependent tasks or completing the whole mission. Do not confuse source inspection with proof of actual runtime behavior.",
+              },
+              completionPolicy: {
+                type: "string",
+                enum: ["report", "review"],
+                description:
+                  "Required for each task. report for read-only informational findings, including researched or source-supported reports. review for modifying/consequential actions or independently assessed outcomes. Delivery is not factual verification.",
+              },
               maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
             },
-            required: ["key","title","assigneeBotId","dependsOn","verificationCriteria","completionPolicy","maxAttempts"],
+            required: [
+              "key",
+              "title",
+              "assigneeBotId",
+              "dependsOn",
+              "verificationCriteria",
+              "completionPolicy",
+              "maxAttempts",
+            ],
           },
         },
       },
@@ -1151,7 +1223,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_status",
-    description: "Inspect one Charlie mission, dependencies, and real delegated bot run statuses. A completed run is not verified work.",
+    description:
+      "Inspect one Charlie mission, dependencies, and real delegated bot run statuses. A completed run is not verified work.",
     inputSchema: {
       type: "object",
       properties: { missionId: { type: "string" } },
@@ -1161,7 +1234,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_dispatch",
-    description: "Activate the persisted Charlie mission. Durable background reconciliation dispatches ready work, retries within budget, and posts one terminal report. Call once after mission_create; do NOT also message_bot or manually poll/reconcile.",
+    description:
+      "Activate the persisted Charlie mission. Durable background reconciliation dispatches ready work, retries within budget, and posts one terminal report. Call once after mission_create; do NOT also message_bot or manually poll/reconcile.",
     inputSchema: {
       type: "object",
       properties: { missionId: { type: "string" } },
@@ -1170,21 +1244,35 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_request_review",
-    description: "Send submitted mission work to a different owned specialist for independent review; do not unlock dependents.",
-    inputSchema: { type: "object", properties: {
-      missionId: { type: "string" }, workKey: { type: "string" }, verifierBotId: { type: "string" },
-    }, required: ["missionId", "workKey", "verifierBotId"] },
+    description:
+      "Send submitted mission work to a different owned specialist for independent review; do not unlock dependents.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+        verifierBotId: { type: "string" },
+      },
+      required: ["missionId", "workKey", "verifierBotId"],
+    },
   },
   {
     name: "mission_finalize_review",
-    description: "Record an evidence verdict only after a different reviewer bot's real completed run and structured report.",
-    inputSchema: { type: "object", properties: {
-      missionId: { type: "string" }, workKey: { type: "string" },
-    }, required: ["missionId", "workKey"] },
+    description:
+      "Record an evidence verdict only after a different reviewer bot's real completed run and structured report.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+      },
+      required: ["missionId", "workKey"],
+    },
   },
   {
     name: "mission_reconcile",
-    description: "Reconcile persisted mission state from real delegated run status. Requeues failed work only when the attempt and deadline budgets permit, without claiming verification.",
+    description:
+      "Reconcile persisted mission state from real delegated run status. Requeues failed work only when the attempt and deadline budgets permit, without claiming verification.",
     inputSchema: {
       type: "object",
       properties: { missionId: { type: "string" } },
@@ -1193,7 +1281,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   },
   {
     name: "mission_submit",
-    description: "Record evidence from a completed delegated bot run as submitted, NOT independently verified. Dependent work remains locked.",
+    description:
+      "Record evidence from a completed delegated bot run as submitted, NOT independently verified. Dependent work remains locked.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1535,7 +1624,8 @@ export const builtinAgentTools: ConnectorTool[] = [
           type: "array",
           items: { type: "string" },
           maxItems: 12,
-          description: "Exact tools this helper needs from your available tools. Omit for a tool-free helper. Never grant unnecessary tools.",
+          description:
+            "Exact tools this helper needs from your available tools. Omit for a tool-free helper. Never grant unnecessary tools.",
         },
         instructions: {
           type: "string",
@@ -1796,7 +1886,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "message_bot",
     description:
-      'Send a useful update, question, or result to another of the user\'s bots. NOT for Chief\'s owner-originated missions: use mission_create + mission_dispatch instead. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. "[to Comms] ...") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.',
+      "Send a useful update, question, or result to another of the user's bots. NOT for Chief's owner-originated missions: use mission_create + mission_dispatch instead. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. \"[to Comms] ...\") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.",
     inputSchema: {
       type: "object",
       properties: {

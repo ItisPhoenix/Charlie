@@ -850,8 +850,6 @@ describePostgres("row-level security (PostgreSQL)", () => {
     const mapped = [...ROW_SECURITY_MODELS].map((name) => models[name]?.dbName ?? name);
     // These Charlie tables use raw-SQL migrations instead of Prisma models,
     // but must still have RLS. Do not exempt them from the protection check.
-    expect(tables).toEqual(
-      [...mapped, "charlie_owner_origin_proofs", "charlie_missions"].sort(),
-    );
+    expect(tables).toEqual([...mapped, "charlie_owner_origin_proofs", "charlie_missions"].sort());
   });
 });
