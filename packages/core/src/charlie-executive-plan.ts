@@ -18,7 +18,7 @@ export type CharlieWorkSpec = {
   key: string;
   title: string;
   assigneeBotId: string;
-  /** Distinct specialist for unattended evidence review; omitted means manual review. */
+  /** Optional independent specialist, invoked only when Chief escalates. */
   verifierBotId?: string;
   dependsOn: readonly string[];
   verificationCriteria: string;
