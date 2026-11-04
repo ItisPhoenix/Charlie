@@ -11,6 +11,7 @@ import type {
 import { runAsSystem } from "@rakazo/db";
 import { messageBot } from "./bot-messages.js";
 import { verifiedDependencyContext } from "./charlie-mission-evidence.js";
+import { openMissionRow, sealMissionColumn } from "./charlie-mission-storage.js";
 import type { RunContext } from "./run-context.js";
 
 type Progress = CharlieWorkProgress & {
@@ -49,15 +50,12 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function parseRow(row: MissionRow): MissionRow {
-  // PostgreSQL's jsonb adapter normally returns objects. Accept textual JSON too.
-  const plan = typeof row.plan === "string" ? JSON.parse(row.plan) : row.plan;
-  const progress = typeof row.progress === "string" ?
-    JSON.parse(row.progress) : row.progress;
-  validateCharlieMissionPlan(plan);
-  if (!Array.isArray(progress)) throw new Error("Invalid stored mission progress");
-  decideCharlieMissionWork(plan, progress);
-  return { ...row, plan, progress };
+async function parseRow(prisma: RunContext["deps"]["prisma"], row: MissionRow): Promise<MissionRow> {
+  const opened = await openMissionRow(prisma, row);
+  validateCharlieMissionPlan(opened.plan);
+  if (!Array.isArray(opened.progress)) throw new Error("Invalid stored mission progress");
+  decideCharlieMissionWork(opened.plan, opened.progress);
+  return opened;
 }
 
 async function findMission(ctx: RunContext, id: string) {
@@ -65,7 +63,7 @@ async function findMission(ctx: RunContext, id: string) {
     'SELECT * FROM "charlie_missions" WHERE "id"=$1 AND "spaceId"=$2 AND "userId"=$3 LIMIT 1',
     id, ctx.run.spaceId, ctx.run.userId,
   );
-  return rows.length ? parseRow(rows[0]!) : null;
+  return rows.length ? parseRow(ctx.deps.prisma, rows[0]!) : null;
 }
 
 /**
@@ -144,13 +142,17 @@ export async function missionCreate(
   if (bots.length !== owners.length) {
     return { error: "Every work assignee must be an active bot owned by this user." };
   }
+  // Seal the mission goal and graph before any persistent insert.
+  const missionId = randomUUID();
+  const encryptedPlan = await sealMissionColumn(ctx.deps.prisma,
+    { id: missionId, spaceId: ctx.run.spaceId, userId: ctx.run.userId }, "plan", plan);
   // Never update or return a different tenant's row on a creation-key conflict.
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'INSERT INTO "charlie_missions" ("id","spaceId","userId","chiefBotId","creationKey","originRunId","plan") ' +
       'VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ' +
       'ON CONFLICT DO NOTHING RETURNING *',
-    randomUUID(), ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
-    creationKey, ctx.run.id, JSON.stringify(plan),
+    missionId, ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
+    creationKey, ctx.run.id, encryptedPlan,
   );
   const [existing] = rows.length ? rows : await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'SELECT * FROM "charlie_missions" WHERE "spaceId"=$1 AND "userId"=$2 ' +
@@ -159,7 +161,7 @@ export async function missionCreate(
     ctx.run.spaceId, ctx.run.userId, ctx.bot.id, creationKey, ctx.run.id,
   );
   if (!existing) return { error: "Mission creation key belongs to another scope." };
-  const mission = parseRow(existing);
+  const mission = await parseRow(ctx.deps.prisma, existing);
   // Repeated model calls during a single owner turn reuse the original mission,
   // irrespective of their distinct tool call/effect identities.
   if (mission.originRunId === ctx.run.id && mission.creationKey !== creationKey) {
@@ -179,15 +181,15 @@ export async function missionList(ctx: RunContext) {
       'ORDER BY "createdAt" DESC LIMIT 20',
     ctx.run.spaceId, ctx.run.userId,
   );
-  return { missions: rows.map((row) => {
-    const mission = parseRow(row);
+  return { missions: await Promise.all(rows.map(async (row) => {
+    const mission = await parseRow(ctx.deps.prisma, row);
     return {
       missionId: mission.id,
       goal: mission.plan.goal,
       createdAt: mission.createdAt.toISOString(),
       decision: decideCharlieMissionWork(mission.plan, mission.progress),
     };
-  }) };
+  })) };
 }
 
 function deliveryKey(id: string, workKey: string, attempt: number) {
@@ -288,7 +290,8 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 AND "progress"=\'[]\'::jsonb RETURNING *',
-    JSON.stringify(progress), row.id, row.spaceId, row.userId, row.revision,
+    await sealMissionColumn(ctx.deps.prisma, row, "progress", progress),
+    row.id, row.spaceId, row.userId, row.revision,
   );
   if (!updated.length) return {
     error: "Mission activation raced another request; read mission_status.",
@@ -298,7 +301,7 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
     ok: true,
     scheduled: initial.ready,
     dispatched: initial.ready,
-    ...rowView(parseRow(updated[0]!)),
+    ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
     note: "Mission activated. The durable reconciler dispatches work internally and retries automatically; do not separately message specialists.",
   };
 }
@@ -335,10 +338,11 @@ export async function missionSubmit(ctx: RunContext, args: Record<string, unknow
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
-    JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+    await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
+    row.id, row.spaceId, row.userId, row.revision,
   );
   if (!updated.length) return { error: "Concurrent change; inspect mission_status and retry." };
-  return { ok: true, ...rowView(parseRow(updated[0]!)),
+  return { ok: true, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
     note: "Execution submitted, not verified. Dependent work remains blocked." };
 }
 
@@ -399,12 +403,13 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
-    JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+    await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
+    row.id, row.spaceId, row.userId, row.revision,
   );
   if (!updated.length) {
     return { error: "Concurrent mission change; reread status and retry." };
   }
-  return { ok: true, changes, deadlineExceeded, ...rowView(parseRow(updated[0]!)) };
+  return { ok: true, changes, deadlineExceeded, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)) };
 }
 
 
@@ -444,10 +449,11 @@ export async function missionRequestReview(ctx: RunContext, args: Record<string,
       'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
         '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
         'AND "revision"=$5 RETURNING *',
-      JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+      await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
+    row.id, row.spaceId, row.userId, row.revision,
     );
     if (!rows.length) return { error: "Concurrent update. Read mission_status and retry." };
-    row = parseRow(rows[0]!);
+    row = await parseRow(ctx.deps.prisma, rows[0]!);
   }
   const text = [
     "Independent Charlie mission review.",
@@ -535,10 +541,11 @@ export async function missionFinalizeReview(ctx: RunContext, args: Record<string
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
-    JSON.stringify(next), row.id, row.spaceId, row.userId, row.revision,
+    await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
+    row.id, row.spaceId, row.userId, row.revision,
   );
   if (!updated.length) return { error: "Concurrent mission update; retry after status read." };
   return { ok: true, reviewVerdict: passed ? "passed" : "failed",
-    reviewerRunId: run.id, ...rowView(parseRow(updated[0]!)),
+    reviewerRunId: run.id, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
     note: "Independent agent review is evidence assessment, not guaranteed truth." };
 }

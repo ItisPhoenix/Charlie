@@ -90,3 +90,10 @@ Never deploy an incomplete Phase 1 batch to production.
 - Missing or truncated reports, incomplete tool effects, unrecognized effects, consequential actions and explicit independent reviews retain the Chief assessment path. Root authority, owner-origin grants, and effect replay protections are unchanged.
 - Use ordinary natural-language owner requests. Chief selects specialists; the owner does not supply IDs or commit hashes.
 - Acceptance remains subject to live deployment and the separate sensitive mission-data encryption requirement.
+
+## Mission ledger protection — at-rest data
+- Mission plan and progress JSONB are sealed with the existing per-space AES-256-GCM content keys, authenticated against the row ID, user ID, table, column and space.
+- Mission creation and subsequent writes are sealed before reaching PostgreSQL. Legacy rows are readable and migrated by the mission reconciler under a row lock, with no migration needed for empty unactivated progress.
+- This uses the existing content-key provider and fails closed if content encryption is disabled; key rotation uses the embedded ciphertext key ID for decryption.
+- Deployment requires an encrypted recovery backup of legacy mission rows before worker migration, because older application revisions cannot read the newly sealed JSONB.
+- Positive-path dependency execution, live encrypted read/write acceptance, and sensitive-backup retention remain separate release checks.

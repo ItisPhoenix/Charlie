@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { appendEventInTransaction, createThreadMessageInTransaction } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { verifiedDependencyContext } from "./charlie-mission-evidence.js";
+import { missionColumnSealed, openMissionRow, sealMissionColumn } from "./charlie-mission-storage.js";
 import { builtinAgentTools } from "./builtin-tools.js";
 
 type Progress = CharlieWorkProgress & {
@@ -90,12 +91,11 @@ function boundedOutcome(value: string): string {
     "\n[EVIDENCE_TRUNCATED: original output exceeded the mission evidence budget; final report incomplete]";
 }
 
-function decode(row: MissionRow): MissionRow {
-  const plan = typeof row.plan === "string" ? JSON.parse(row.plan) : row.plan;
-  const progress = typeof row.progress === "string" ? JSON.parse(row.progress) : row.progress;
-  validateCharlieMissionPlan(plan);
-  decideCharlieMissionWork(plan, progress);
-  return { ...row, plan, progress };
+async function decode(prisma: PrismaClient, row: MissionRow): Promise<MissionRow> {
+  const opened = await openMissionRow(prisma, row);
+  validateCharlieMissionPlan(opened.plan);
+  decideCharlieMissionWork(opened.plan, opened.progress);
+  return opened;
 }
 
 function runNonce(id: string, key: string, attempt: number) {
@@ -319,7 +319,23 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
       'SELECT * FROM "charlie_missions" WHERE "id"=$1 FOR UPDATE', id,
     );
     if (!rows.length) return { scheduled: [], notices: [] };
-    const row = decode(rows[0]!);
+    const stored = rows[0]!;
+    const row = await decode(prisma, stored);
+    // Convert legacy plaintext JSONB to authenticated ciphertext while the
+    // durable mission row is locked. This also migrates terminal missions.
+    if (!missionColumnSealed(stored.plan) ||
+        (row.progress.length > 0 && !missionColumnSealed(stored.progress))) {
+      const sealedPlan = await sealMissionColumn(prisma, row, "plan", row.plan);
+      // An unactivated mission has [] progress. Keep that empty sentinel so
+      // mission_dispatch's compare-and-swap activation still works.
+      const sealedProgress = row.progress.length === 0 ? "[]" :
+        await sealMissionColumn(prisma, row, "progress", row.progress);
+      await tx.$executeRawUnsafe(
+        'UPDATE "charlie_missions" SET "plan"=$1::jsonb, "progress"=$2::jsonb,' +
+          '"updatedAt"=NOW() WHERE "id"=$3',
+        sealedPlan, sealedProgress, row.id,
+      );
+    }
     // Do not auto-start newly created plans before the authenticated owner
     // activates them. Once the budget expires, however, a never-activated
     // mission must become a durable terminal blocker rather than disappear.
@@ -617,7 +633,7 @@ async function advanceMission(prisma: PrismaClient, id: string, now: Date): Prom
       await tx.$executeRawUnsafe(
         'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
           '"updatedAt"=NOW() WHERE "id"=$2',
-        JSON.stringify(next), row.id,
+        await sealMissionColumn(prisma, row, "progress", next), row.id,
       );
       const previous = decideCharlieMissionWork(row.plan, row.progress);
       const latest = decideCharlieMissionWork(row.plan, next);
