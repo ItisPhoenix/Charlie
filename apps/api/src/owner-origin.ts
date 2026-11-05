@@ -15,11 +15,13 @@ export async function attestAuthenticatedOwnerOrigin(
 ): Promise<void> {
   const keyPath = process.env.CHARLIE_OWNER_SIGNING_KEY_FILE;
   const chiefId = process.env.CHARLIE_OWNER_CHIEF_BOT_ID;
+  const gordonId = process.env.CHARLIE_OWNER_GORDON_BOT_ID;
 
-  // Disabled until the API-only key mount is deployed.
-  if (!keyPath || !chiefId || input.botId !== chiefId) return;
+  // Only a signed-in owner may establish host authority, either through Chief
+  // or by addressing Gordon directly. Never attest agent-generated messages.
+  if (!keyPath || !chiefId || !gordonId || ![chiefId, gordonId].includes(input.botId)) return;
 
-  // Only a new, plain-text human request to Chief is attested.
+  // Only a new, plain-text owner request is attested. Tool output and bot messages are excluded.
   if (input.blocks.length !== 1 || input.blocks[0]?.kind !== "text") return;
   const prompt = input.blocks[0].text;
   if (typeof prompt !== "string" || !prompt.trim()) return;
