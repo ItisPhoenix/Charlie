@@ -3,9 +3,9 @@ import { MessageBlock } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
   BACKGROUND_RUN_TRIGGERS,
-  INTERNAL_MISSION_RUN_TRIGGERS,
   botMessageContext,
   displayName,
+  INTERNAL_MISSION_RUN_TRIGGERS,
   truncatePlainText,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";

@@ -51,9 +51,7 @@ export async function attestAuthenticatedOwnerOrigin(
     chief_bot_id: input.botId,
     origin_run_id: input.runId,
     source_message_id: input.sourceMessageId,
-    prompt_sha256: createHash("sha256")
-      .update(prompt, "utf8")
-      .digest("hex"),
+    prompt_sha256: createHash("sha256").update(prompt, "utf8").digest("hex"),
     issued_at: now,
     expires_at: now + 3600,
     nonce: randomUUID(),

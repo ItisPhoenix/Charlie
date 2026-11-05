@@ -21,6 +21,7 @@ export * from "./bot-sender-name.js";
 export * from "./call-nonce.js";
 export * from "./call-request.js";
 export * from "./call-session.js";
+export * from "./charlie-executive-plan.js";
 export * from "./client-id.js";
 export * from "./cloud-agent.js";
 export * from "./compose-update.js";
@@ -105,5 +106,3 @@ export * from "./unread-divider.js";
 export * from "./user-error.js";
 export * from "./voice-chat-groups.js";
 export * from "./voice-response.js";
-
-export * from "./charlie-executive-plan.js";

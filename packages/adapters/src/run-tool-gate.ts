@@ -322,24 +322,25 @@ export async function gateToolCall(
     ctx.bot.id === process.env.CHARLIE_OWNER_GORDON_BOT_ID &&
     Boolean(process.env.CHARLIE_GORDON_HOST_SOCKET);
 
-  const plan = gordonOwnerHost && approvalResolved.decision !== "deny"
-    ? "allow"
-    : USER_COMPUTER_TOOLS.has(name)
-    ? await userComputerGate(ctx, approvalResolved.decision === "deny", name, args)
-    : planActionGate({
-        resolved: approvalResolved,
-        mode,
-        mandatory: requiresMandatoryApproval,
-        steerable:
-          guardedInNeverAsk && mode === "never"
-            ? !ctx.source.ownerStartedRun || (await isRunTainted(ctx))
-            : undefined,
-        consequential: requiresApprovalByDefault,
-        reviewOnly: connectorReadGated,
-        checkerConfigured,
-        newDestination: siteGate === "new",
-        purchase: Boolean(purchase),
-      });
+  const plan =
+    gordonOwnerHost && approvalResolved.decision !== "deny"
+      ? "allow"
+      : USER_COMPUTER_TOOLS.has(name)
+        ? await userComputerGate(ctx, approvalResolved.decision === "deny", name, args)
+        : planActionGate({
+            resolved: approvalResolved,
+            mode,
+            mandatory: requiresMandatoryApproval,
+            steerable:
+              guardedInNeverAsk && mode === "never"
+                ? !ctx.source.ownerStartedRun || (await isRunTainted(ctx))
+                : undefined,
+            consequential: requiresApprovalByDefault,
+            reviewOnly: connectorReadGated,
+            checkerConfigured,
+            newDestination: siteGate === "new",
+            purchase: Boolean(purchase),
+          });
   // Nobody is there to approve a purchase a webhook run reaches.
   if (purchase && run.trigger === "webhook" && plan !== "deny") {
     await auditToolCall(ctx, name, "denied", { reason: "purchase_unattended" });

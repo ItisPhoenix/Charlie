@@ -147,30 +147,25 @@ export function findTools(
           (entry) => deferred.find((tool) => tool.name === entry.id)!,
         )
       : [];
-  const directlyOffered = offered.filter(
-    (tool) => !isDeferredTool(tool.name),
-  );
+  const directlyOffered = offered.filter((tool) => !isDeferredTool(tool.name));
   const directlyAvailable = names.length
-    ? directlyOffered
-        .filter((tool) => names.includes(tool.name))
-        .map((tool) => tool.name)
+    ? directlyOffered.filter((tool) => names.includes(tool.name)).map((tool) => tool.name)
     : query
-      ? rankCatalogEntries(
-          searchEntries(directlyOffered),
-          query,
-          FIND_TOOL_LIMIT,
-        ).hits.map((entry) => entry.tool.name)
+      ? rankCatalogEntries(searchEntries(directlyOffered), query, FIND_TOOL_LIMIT).hits.map(
+          (entry) => entry.tool.name,
+        )
       : [];
   const unknown = names.filter(
-    (name) => !found.some((tool) => tool.name === name) &&
-      !directlyAvailable.includes(name),
+    (name) => !found.some((tool) => tool.name === name) && !directlyAvailable.includes(name),
   );
   return {
     tools: found.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
     ...(directlyAvailable.length ? { directlyAvailable } : {}),
     ...(unknown.length ? { unknown } : {}),
     ...(directlyAvailable.length
-      ? { hint: "Tools in directlyAvailable are already offered to you. Call them directly, not through use_tool." }
+      ? {
+          hint: "Tools in directlyAvailable are already offered to you. Call them directly, not through use_tool.",
+        }
       : found.length
         ? {}
         : { hint: "Pass names from this tool's list or other words." }),

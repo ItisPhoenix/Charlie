@@ -87,7 +87,9 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Object({
       name: Type.String(),
       task: Type.String(),
-      tools: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 12 })),
+      tools: Type.Optional(
+        Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 12 }),
+      ),
       instructions: Type.Optional(Type.String()),
       model_provider: Type.Optional(Type.String()),
       model_id: Type.Optional(Type.String()),

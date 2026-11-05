@@ -702,6 +702,7 @@ export type AgentRuntimeEvent =
       task: string;
       status: "running" | "completed" | "failed";
       progress?: string;
+      tools?: string[];
       result?: string;
     }
   | { type: "done"; text?: string };

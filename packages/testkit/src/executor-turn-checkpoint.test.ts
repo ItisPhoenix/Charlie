@@ -841,7 +841,11 @@ describe("executor paused transcript", () => {
             type: "tool",
             id: "delegate",
             name: "run_subagent",
-            arguments: { name: "helper", task: "Write the helper fixture." },
+            arguments: {
+              name: "helper",
+              task: "Write the helper fixture.",
+              tools: ["fixture_write"],
+            },
           },
         },
         {

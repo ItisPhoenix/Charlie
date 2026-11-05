@@ -55,16 +55,14 @@ export async function executeSubagent(
   if (
     !Array.isArray(requestedTools) ||
     requestedTools.length > 12 ||
-    requestedTools.some(
-      (name) => typeof name !== "string" || !name.trim() || name.length > 128,
-    )
+    requestedTools.some((name) => typeof name !== "string" || !name.trim() || name.length > 128)
   ) {
     return "Subagent refused: invalid tool selection.";
   }
 
   const availableTools = new Map(
     host.request.tools
-      .filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name))
+      .filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name) && tool.name !== "update_bot")
       .map((tool) => [tool.name, tool] as const),
   );
 
@@ -141,9 +139,7 @@ export async function executeSubagent(
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
 
-  const childDefs = [...new Set(requestedTools)].map(
-    (name) => availableTools.get(name)!,
-  );
+  const childDefs = [...new Set(requestedTools)].map((name) => availableTools.get(name)!);
   const nestedHost: ToolHost = {
     ...host,
     activeModel: {
@@ -414,6 +410,7 @@ export async function executeSubagent(
       name,
       task,
       status: "completed",
+      tools: requestedTools,
       result: clipped,
     });
     // The parent bot reads this as a tool result; say plainly that it is the helper talking.

@@ -74,10 +74,16 @@ export const messagingTools: ToolHandlers = {
   async message_user(ctx, call) {
     const { deps, run } = ctx;
     if (run.trigger === "user" && ctx.bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
-      return call.finish({ error: "Chief sends one acknowledgement after mission activation; do not post interim progress messages." });
+      return call.finish({
+        error:
+          "Chief sends one acknowledgement after mission activation; do not post interim progress messages.",
+      });
     }
     if (isInternalMissionRunTrigger(run.trigger)) {
-      return call.finish({ error: "Internal mission runs save their result to the mission ledger; owner progress messages are unavailable." });
+      return call.finish({
+        error:
+          "Internal mission runs save their result to the mission ledger; owner progress messages are unavailable.",
+      });
     }
     const { args } = call;
     const { reply } = ctx.state;
@@ -119,17 +125,18 @@ export const messagingTools: ToolHandlers = {
     const { deps, run, bot } = ctx;
     if (isInternalMissionRunTrigger(run.trigger)) {
       return call.finish({
-        error: "Mission coordination is handled by the durable mission runner. Put your complete evidence in the final reply; do not send separate bot messages or wake Chief.",
+        error:
+          "Mission coordination is handled by the durable mission runner. Put your complete evidence in the final reply; do not send separate bot messages or wake Chief.",
       });
     }
     const { args, effectKey } = call;
     // Chief owner turns always delegate through the mission ledger.
     // The former pre-creation exception caused an extra bot_message run and
     // an unsolicited follow-up reply on the owner-facing thread.
-    if (run.trigger === "user" &&
-        bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
+    if (run.trigger === "user" && bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) {
       return call.finish({
-        error: "Use mission_create followed by mission_dispatch. The durable mission runner handles all delegation, retries and final reporting; direct message_bot is not a mission dispatch.",
+        error:
+          "Use mission_create followed by mission_dispatch. The durable mission runner handles all delegation, retries and final reporting; direct message_bot is not a mission dispatch.",
       });
     }
     const sent = await messageBot(

@@ -1,12 +1,9 @@
 import { randomUUID } from "node:crypto";
+import type { CharlieMissionPlan, CharlieWorkProgress } from "@rakazo/core";
 import {
   BOT_MESSAGE_MAX_LENGTH,
   decideCharlieMissionWork,
   validateCharlieMissionPlan,
-} from "@rakazo/core";
-import type {
-  CharlieMissionPlan,
-  CharlieWorkProgress,
 } from "@rakazo/core";
 import { runAsSystem } from "@rakazo/db";
 import { messageBot } from "./bot-messages.js";
@@ -36,21 +33,31 @@ type MissionRow = {
 };
 
 function stringValue(value: unknown, max: number): string | undefined {
-  return typeof value === "string" &&
-    value.length > 0 && value.length <= max ? value : undefined;
+  return typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined;
 }
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
   if (value !== null && typeof value === "object") {
-    return "{" + Object.keys(value).sort().map((key) =>
-      JSON.stringify(key) + ":" + canonicalJson((value as Record<string, unknown>)[key])
-    ).join(",") + "}";
+    return (
+      "{" +
+      Object.keys(value)
+        .sort()
+        .map(
+          (key) =>
+            JSON.stringify(key) + ":" + canonicalJson((value as Record<string, unknown>)[key]),
+        )
+        .join(",") +
+      "}"
+    );
   }
   return JSON.stringify(value);
 }
 
-async function parseRow(prisma: RunContext["deps"]["prisma"], row: MissionRow): Promise<MissionRow> {
+async function parseRow(
+  prisma: RunContext["deps"]["prisma"],
+  row: MissionRow,
+): Promise<MissionRow> {
   const opened = await openMissionRow(prisma, row);
   validateCharlieMissionPlan(opened.plan);
   if (!Array.isArray(opened.progress)) throw new Error("Invalid stored mission progress");
@@ -61,7 +68,9 @@ async function parseRow(prisma: RunContext["deps"]["prisma"], row: MissionRow): 
 async function findMission(ctx: RunContext, id: string) {
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'SELECT * FROM "charlie_missions" WHERE "id"=$1 AND "spaceId"=$2 AND "userId"=$3 LIMIT 1',
-    id, ctx.run.spaceId, ctx.run.userId,
+    id,
+    ctx.run.spaceId,
+    ctx.run.userId,
   );
   return rows.length ? parseRow(ctx.deps.prisma, rows[0]!) : null;
 }
@@ -72,9 +81,12 @@ async function findMission(ctx: RunContext, id: string) {
  * This permits owner-originated decisions but does not grant Ubuntu authority.
  */
 async function ownerAuthorized(ctx: RunContext): Promise<boolean> {
-  if (ctx.run.trigger !== "user" ||
-      !ctx.source.ownerStartedRun ||
-      ctx.bot.id !== process.env.CHARLIE_OWNER_CHIEF_BOT_ID) return false;
+  if (
+    ctx.run.trigger !== "user" ||
+    !ctx.source.ownerStartedRun ||
+    ctx.bot.id !== process.env.CHARLIE_OWNER_CHIEF_BOT_ID
+  )
+    return false;
 
   const proof = await runAsSystem("Charlie executive mission owner-origin lookup", () =>
     ctx.deps.prisma.charlieOwnerOriginProof.findUnique({
@@ -82,8 +94,7 @@ async function ownerAuthorized(ctx: RunContext): Promise<boolean> {
       select: { userId: true, spaceId: true },
     }),
   );
-  return proof?.userId === ctx.run.userId &&
-    proof.spaceId === ctx.run.spaceId;
+  return proof?.userId === ctx.run.userId && proof.spaceId === ctx.run.spaceId;
 }
 
 function rowView(row: MissionRow) {
@@ -96,8 +107,11 @@ function rowView(row: MissionRow) {
     decision,
     work: row.plan.work.map((spec) => ({
       ...spec,
-      progress: row.progress.find((entry) => entry.key === spec.key) ??
-        { key: spec.key, state: "planned", attempts: 0 },
+      progress: row.progress.find((entry) => entry.key === spec.key) ?? {
+        key: spec.key,
+        state: "planned",
+        attempts: 0,
+      },
     })),
   };
 }
@@ -123,13 +137,19 @@ export async function missionCreate(
   }
 
   if (!stringValue(creationKey, 256)) return { error: "Invalid mission creation key." };
-  if (plan.work.some((item) =>
-    item.assigneeBotId === ctx.bot.id || item.verifierBotId === ctx.bot.id)) {
+  if (
+    plan.work.some((item) => item.assigneeBotId === ctx.bot.id || item.verifierBotId === ctx.bot.id)
+  ) {
     return { error: "Chief must coordinate work, not delegate to itself." };
   }
-  const owners = [...new Set(plan.work.flatMap((item) =>
-    [item.assigneeBotId, ...(item.verifierBotId ? [item.verifierBotId] : [])],
-  ))];
+  const owners = [
+    ...new Set(
+      plan.work.flatMap((item) => [
+        item.assigneeBotId,
+        ...(item.verifierBotId ? [item.verifierBotId] : []),
+      ]),
+    ),
+  ];
   const bots = await ctx.deps.prisma.bot.findMany({
     where: {
       id: { in: owners },
@@ -144,52 +164,79 @@ export async function missionCreate(
   }
   // Seal the mission goal and graph before any persistent insert.
   const missionId = randomUUID();
-  const encryptedPlan = await sealMissionColumn(ctx.deps.prisma,
-    { id: missionId, spaceId: ctx.run.spaceId, userId: ctx.run.userId }, "plan", plan);
+  const encryptedPlan = await sealMissionColumn(
+    ctx.deps.prisma,
+    { id: missionId, spaceId: ctx.run.spaceId, userId: ctx.run.userId },
+    "plan",
+    plan,
+  );
   // Never update or return a different tenant's row on a creation-key conflict.
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'INSERT INTO "charlie_missions" ("id","spaceId","userId","chiefBotId","creationKey","originRunId","plan") ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ' +
-      'ON CONFLICT DO NOTHING RETURNING *',
-    missionId, ctx.run.spaceId, ctx.run.userId, ctx.bot.id,
-    creationKey, ctx.run.id, encryptedPlan,
+      "VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) " +
+      "ON CONFLICT DO NOTHING RETURNING *",
+    missionId,
+    ctx.run.spaceId,
+    ctx.run.userId,
+    ctx.bot.id,
+    creationKey,
+    ctx.run.id,
+    encryptedPlan,
   );
-  const [existing] = rows.length ? rows : await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
-    'SELECT * FROM "charlie_missions" WHERE "spaceId"=$1 AND "userId"=$2 ' +
-      'AND "chiefBotId"=$3 AND ("creationKey"=$4 OR "originRunId"=$5) ' +
-      'ORDER BY CASE WHEN "originRunId"=$5 THEN 0 ELSE 1 END LIMIT 1',
-    ctx.run.spaceId, ctx.run.userId, ctx.bot.id, creationKey, ctx.run.id,
-  );
+  const [existing] = rows.length
+    ? rows
+    : await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
+        'SELECT * FROM "charlie_missions" WHERE "spaceId"=$1 AND "userId"=$2 ' +
+          'AND "chiefBotId"=$3 AND ("creationKey"=$4 OR "originRunId"=$5) ' +
+          'ORDER BY CASE WHEN "originRunId"=$5 THEN 0 ELSE 1 END LIMIT 1',
+        ctx.run.spaceId,
+        ctx.run.userId,
+        ctx.bot.id,
+        creationKey,
+        ctx.run.id,
+      );
   if (!existing) return { error: "Mission creation key belongs to another scope." };
   const mission = await parseRow(ctx.deps.prisma, existing);
   // Repeated model calls during a single owner turn reuse the original mission,
   // irrespective of their distinct tool call/effect identities.
   if (mission.originRunId === ctx.run.id && mission.creationKey !== creationKey) {
-    return { ok: true, reused: true, ...rowView(mission),
-      note: "Mission already exists for this owner request; continue it." };
+    return {
+      ok: true,
+      reused: true,
+      ...rowView(mission),
+      note: "Mission already exists for this owner request; continue it.",
+    };
   }
   if (canonicalJson(mission.plan) !== canonicalJson(plan)) {
     return { error: "Mission creation key cannot be reused for a different plan." };
   }
-  return { ok: true, ...rowView(mission), note:
-    "Mission persisted; dispatch ready tasks with mission_dispatch." };
+  return {
+    ok: true,
+    ...rowView(mission),
+    note: "Mission persisted; dispatch ready tasks with mission_dispatch.",
+  };
 }
 
 export async function missionList(ctx: RunContext) {
   const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'SELECT * FROM "charlie_missions" WHERE "spaceId"=$1 AND "userId"=$2 ' +
       'ORDER BY "createdAt" DESC LIMIT 20',
-    ctx.run.spaceId, ctx.run.userId,
+    ctx.run.spaceId,
+    ctx.run.userId,
   );
-  return { missions: await Promise.all(rows.map(async (row) => {
-    const mission = await parseRow(ctx.deps.prisma, row);
-    return {
-      missionId: mission.id,
-      goal: mission.plan.goal,
-      createdAt: mission.createdAt.toISOString(),
-      decision: decideCharlieMissionWork(mission.plan, mission.progress),
-    };
-  })) };
+  return {
+    missions: await Promise.all(
+      rows.map(async (row) => {
+        const mission = await parseRow(ctx.deps.prisma, row);
+        return {
+          missionId: mission.id,
+          goal: mission.plan.goal,
+          createdAt: mission.createdAt.toISOString(),
+          decision: decideCharlieMissionWork(mission.plan, mission.progress),
+        };
+      }),
+    ),
+  };
 }
 
 function deliveryKey(id: string, workKey: string, attempt: number) {
@@ -226,9 +273,9 @@ async function delegatedRun(ctx: RunContext, row: MissionRow, workKey: string) {
     where: {
       threadId_clientNonce: {
         threadId: bot.thread.id,
-        clientNonce: "bot-message:" + deliveryKey(
-          row.id, spec.key, row.progress.find((p) => p.key === workKey)?.attempts ?? 1,
-        ),
+        clientNonce:
+          "bot-message:" +
+          deliveryKey(row.id, spec.key, row.progress.find((p) => p.key === workKey)?.attempts ?? 1),
       },
     },
     select: { runId: true },
@@ -251,10 +298,12 @@ export async function missionStatus(ctx: RunContext, args: Record<string, unknow
   const row = await findMission(ctx, id);
   if (!row) return { error: "Mission not found." };
   const result = rowView(row);
-  const runs = await Promise.all(row.plan.work.map(async (spec) => {
-    const run = await delegatedRun(ctx, row, spec.key);
-    return { key: spec.key, runId: run?.id ?? null, runStatus: run?.status ?? null };
-  }));
+  const runs = await Promise.all(
+    row.plan.work.map(async (spec) => {
+      const run = await delegatedRun(ctx, row, spec.key);
+      return { key: spec.key, runId: run?.id ?? null, runStatus: run?.status ?? null };
+    }),
+  );
   const deadline = row.createdAt.getTime() + row.plan.maxRuntimeSeconds * 1000;
   return { ...result, delegatedRuns: runs, deadlineExceeded: Date.now() >= deadline };
 }
@@ -284,19 +333,25 @@ export async function missionDispatch(ctx: RunContext, args: Record<string, unkn
   const initial = decideCharlieMissionWork(row.plan, []);
   if (!initial.ready.length) return { error: "No ready work exists." };
   const progress: Progress[] = row.plan.work.map((item) => ({
-    key: item.key, state: "planned", attempts: 0,
+    key: item.key,
+    state: "planned",
+    attempts: 0,
   }));
   const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 AND "progress"=\'[]\'::jsonb RETURNING *',
     await sealMissionColumn(ctx.deps.prisma, row, "progress", progress),
-    row.id, row.spaceId, row.userId, row.revision,
+    row.id,
+    row.spaceId,
+    row.userId,
+    row.revision,
   );
-  if (!updated.length) return {
-    error: "Mission activation raced another request; read mission_status.",
-    retrySafe: true,
-  };
+  if (!updated.length)
+    return {
+      error: "Mission activation raced another request; read mission_status.",
+      retrySafe: true,
+    };
   return {
     ok: true,
     scheduled: initial.ready,
@@ -326,8 +381,11 @@ export async function missionSubmit(ctx: RunContext, args: Record<string, unknow
     return { error: "Work must have been delegated before submission." };
   }
   const run = await delegatedRun(ctx, row, key);
-  if (!run || run.status !== "completed" ||
-      !["bot_message", "charlie_mission"].includes(run.trigger)) {
+  if (
+    !run ||
+    run.status !== "completed" ||
+    !["bot_message", "charlie_mission"].includes(run.trigger)
+  ) {
     return { error: "A completed delegated bot run is required for submission." };
   }
   const next: Progress[] = [
@@ -339,13 +397,18 @@ export async function missionSubmit(ctx: RunContext, args: Record<string, unknow
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
     await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
-    row.id, row.spaceId, row.userId, row.revision,
+    row.id,
+    row.spaceId,
+    row.userId,
+    row.revision,
   );
   if (!updated.length) return { error: "Concurrent change; inspect mission_status and retry." };
-  return { ok: true, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
-    note: "Execution submitted, not verified. Dependent work remains blocked." };
+  return {
+    ok: true,
+    ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
+    note: "Execution submitted, not verified. Dependent work remains blocked.",
+  };
 }
-
 
 /**
  * Reconcile durable mission progress against actual child-run states.
@@ -369,10 +432,16 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
 
   for (const spec of row.plan.work) {
     const prior = next.find((item) => item.key === spec.key);
-    if (prior?.state === "submitted" || prior?.state === "verifying" ||
-        prior?.state === "verified" || prior?.state === "delivered" ||
-        prior?.state === "failed" || prior?.state === "cancelled" ||
-        prior?.state === "blocked") continue;
+    if (
+      prior?.state === "submitted" ||
+      prior?.state === "verifying" ||
+      prior?.state === "verified" ||
+      prior?.state === "delivered" ||
+      prior?.state === "failed" ||
+      prior?.state === "cancelled" ||
+      prior?.state === "blocked"
+    )
+      continue;
 
     const child = await delegatedRun(ctx, row, spec.key);
     if (!child) continue;
@@ -405,14 +474,21 @@ export async function missionReconcile(ctx: RunContext, args: Record<string, unk
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
     await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
-    row.id, row.spaceId, row.userId, row.revision,
+    row.id,
+    row.spaceId,
+    row.userId,
+    row.revision,
   );
   if (!updated.length) {
     return { error: "Concurrent mission change; reread status and retry." };
   }
-  return { ok: true, changes, deadlineExceeded, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)) };
+  return {
+    ok: true,
+    changes,
+    deadlineExceeded,
+    ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
+  };
 }
-
 
 function reviewerKey(row: MissionRow, key: string, attempt: number) {
   return "charlie-review:" + row.id + ":" + key + ":attempt:" + attempt;
@@ -420,11 +496,13 @@ function reviewerKey(row: MissionRow, key: string, attempt: number) {
 
 /** Keep review work separate from execution. A claim alone cannot unlock dependencies. */
 export async function missionRequestReview(ctx: RunContext, args: Record<string, unknown>) {
-  if (!(await ownerAuthorized(ctx))) return { error: "Fresh owner-to-Charlie authority is required." };
+  if (!(await ownerAuthorized(ctx)))
+    return { error: "Fresh owner-to-Charlie authority is required." };
   const id = stringValue(args.missionId, 128);
   const key = stringValue(args.workKey, 64);
   const verifierId = stringValue(args.verifierBotId, 128);
-  if (!id || !key || !verifierId) return { error: "missionId, workKey and verifierBotId are required." };
+  if (!id || !key || !verifierId)
+    return { error: "missionId, workKey and verifierBotId are required." };
   let row = await findMission(ctx, id);
   if (!row || row.chiefBotId !== ctx.bot.id) return { error: "Mission not found." };
   const item = row.plan.work.find((work) => work.key === key);
@@ -444,14 +522,18 @@ export async function missionRequestReview(ctx: RunContext, args: Record<string,
   });
   if (!reviewer) return { error: "Reviewer is not an active owned specialist." };
   if (progress.state === "submitted") {
-    const next = row.progress.map((work) => work.key === key
-      ? { ...work, state: "verifying" as const, verifierBotId: verifierId } : work);
+    const next = row.progress.map((work) =>
+      work.key === key ? { ...work, state: "verifying" as const, verifierBotId: verifierId } : work,
+    );
     const rows = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
       'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
         '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
         'AND "revision"=$5 RETURNING *',
       await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
-    row.id, row.spaceId, row.userId, row.revision,
+      row.id,
+      row.spaceId,
+      row.userId,
+      row.revision,
     );
     if (!rows.length) return { error: "Concurrent update. Read mission_status and retry." };
     row = await parseRow(ctx.deps.prisma, rows[0]!);
@@ -459,7 +541,8 @@ export async function missionRequestReview(ctx: RunContext, args: Record<string,
   const text = [
     "Independent Charlie mission review.",
     "Mission " + row.id + " / work " + key,
-    "Goal: " + row.plan.goal, "Task: " + item.title,
+    "Goal: " + row.plan.goal,
+    "Task: " + item.title,
     "Criteria: " + item.verificationCriteria,
     "UNTRUSTED executor claim: " + progress.evidence,
     "Inspect the result independently, not just the claimant's description.",
@@ -469,20 +552,29 @@ export async function missionRequestReview(ctx: RunContext, args: Record<string,
   ].join("\n");
   if (text.length > BOT_MESSAGE_MAX_LENGTH) return { error: "Review request is too long." };
   const outcome = await messageBot(
-    ctx.deps, { ...ctx.run, sourceMessageId: ctx.run.sourceMessageId },
+    ctx.deps,
+    { ...ctx.run, sourceMessageId: ctx.run.sourceMessageId },
     { id: ctx.bot.id, name: ctx.bot.name },
     {
-      bot_id: verifierId, intent: "request", message: text,
+      bot_id: verifierId,
+      intent: "request",
+      message: text,
       deliveryKey: reviewerKey(row, key, progress.attempts),
     },
   );
   if (!outcome.ok) return { error: outcome.error, reviewPending: true, retrySafe: true };
-  return { ok: true, missionId: id, workKey: key, reviewerBotId: verifierId,
-    note: "Verification run queued. Work is not yet verified." };
+  return {
+    ok: true,
+    missionId: id,
+    workKey: key,
+    reviewerBotId: verifierId,
+    note: "Verification run queued. Work is not yet verified.",
+  };
 }
 
 export async function missionFinalizeReview(ctx: RunContext, args: Record<string, unknown>) {
-  if (!(await ownerAuthorized(ctx))) return { error: "Fresh owner-to-Charlie authority is required." };
+  if (!(await ownerAuthorized(ctx)))
+    return { error: "Fresh owner-to-Charlie authority is required." };
   const id = stringValue(args.missionId, 128);
   const key = stringValue(args.workKey, 64);
   if (!id || !key) return { error: "missionId and workKey are required." };
@@ -498,17 +590,23 @@ export async function missionFinalizeReview(ctx: RunContext, args: Record<string
   });
   if (!verifier?.thread) return { error: "Reviewer no longer available." };
   const inbound = await ctx.deps.prisma.message.findUnique({
-    where: { threadId_clientNonce: {
-      threadId: verifier.thread.id,
-      clientNonce: "bot-message:" + reviewerKey(row, key, work.attempts),
-    } },
+    where: {
+      threadId_clientNonce: {
+        threadId: verifier.thread.id,
+        clientNonce: "bot-message:" + reviewerKey(row, key, work.attempts),
+      },
+    },
     select: { runId: true },
   });
   if (!inbound?.runId) return { error: "Review was not delivered." };
   const run = await ctx.deps.prisma.run.findFirst({
     where: {
-      id: inbound.runId, spaceId: row.spaceId, userId: row.userId,
-      botId: work.verifierBotId, trigger: "bot_message", status: "completed",
+      id: inbound.runId,
+      spaceId: row.spaceId,
+      userId: row.userId,
+      botId: work.verifierBotId,
+      trigger: "bot_message",
+      status: "completed",
     },
     select: { id: true },
   });
@@ -524,29 +622,49 @@ export async function missionFinalizeReview(ctx: RunContext, args: Record<string
     for (const raw of message.blocks) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
       const block = raw as Record<string, unknown>;
-      if (block.kind === "bot_message_sent" &&
-          block.toBotId === ctx.bot.id && block.intent === "result" &&
-          typeof block.text === "string") reports.push(block.text);
+      if (
+        block.kind === "bot_message_sent" &&
+        block.toBotId === ctx.bot.id &&
+        block.intent === "result" &&
+        typeof block.text === "string"
+      )
+        reports.push(block.text);
     }
   }
-  const report = reports.find((text) =>
-    /^(MISSION_REVIEW_PASS|MISSION_REVIEW_FAIL)\s*\nEvidence:\s*\S/.test(text.trim()) &&
-    text.length >= 75 && text.length <= BOT_MESSAGE_MAX_LENGTH);
+  const report = reports.find(
+    (text) =>
+      /^(MISSION_REVIEW_PASS|MISSION_REVIEW_FAIL)\s*\nEvidence:\s*\S/.test(text.trim()) &&
+      text.length >= 75 &&
+      text.length <= BOT_MESSAGE_MAX_LENGTH,
+  );
   if (!report) return { error: "Reviewer did not provide a structured evidence report." };
   const passed = report.trim().startsWith("MISSION_REVIEW_PASS");
-  const next = row.progress.map((item) => item.key === key ? {
-    ...item, state: passed ? "verified" as const : "blocked" as const,
-    verifierRunId: run.id, reviewEvidence: report,
-  } : item);
+  const next = row.progress.map((item) =>
+    item.key === key
+      ? {
+          ...item,
+          state: passed ? ("verified" as const) : ("blocked" as const),
+          verifierRunId: run.id,
+          reviewEvidence: report,
+        }
+      : item,
+  );
   const updated = await ctx.deps.prisma.$queryRawUnsafe<MissionRow[]>(
     'UPDATE "charlie_missions" SET "progress"=$1::jsonb, "revision"="revision"+1,' +
       '"updatedAt"=NOW() WHERE "id"=$2 AND "spaceId"=$3 AND "userId"=$4 ' +
       'AND "revision"=$5 RETURNING *',
     await sealMissionColumn(ctx.deps.prisma, row, "progress", next),
-    row.id, row.spaceId, row.userId, row.revision,
+    row.id,
+    row.spaceId,
+    row.userId,
+    row.revision,
   );
   if (!updated.length) return { error: "Concurrent mission update; retry after status read." };
-  return { ok: true, reviewVerdict: passed ? "passed" : "failed",
-    reviewerRunId: run.id, ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
-    note: "Independent agent review is evidence assessment, not guaranteed truth." };
+  return {
+    ok: true,
+    reviewVerdict: passed ? "passed" : "failed",
+    reviewerRunId: run.id,
+    ...rowView(await parseRow(ctx.deps.prisma, updated[0]!)),
+    note: "Independent agent review is evidence assessment, not guaranteed truth.",
+  };
 }

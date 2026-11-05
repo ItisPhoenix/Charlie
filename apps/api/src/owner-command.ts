@@ -1,9 +1,4 @@
-import {
-  createHash,
-  createPublicKey,
-  sign,
-  verify,
-} from "node:crypto";
+import { createHash, createPublicKey, sign, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { PrismaClient } from "@rakazo/db";
 
@@ -43,7 +38,8 @@ export async function issueGordonCommandGrant(
     typeof command !== "string" ||
     !command.length ||
     Buffer.byteLength(command, "utf8") > 8192
-  ) return null;
+  )
+    return null;
 
   const gordon = await prisma.run.findUnique({
     where: { id: runId },
@@ -55,16 +51,13 @@ export async function issueGordonCommandGrant(
     gordon.trigger !== "bot_message" ||
     gordon.status !== "running" ||
     !gordon.sourceMessageId
-  ) return null;
+  )
+    return null;
 
   const inbound = await prisma.message.findUnique({
     where: { id: gordon.sourceMessageId },
   });
-  if (
-    !inbound ||
-    inbound.threadId !== gordon.threadId ||
-    inbound.runId !== gordon.id
-  ) return null;
+  if (!inbound || inbound.threadId !== gordon.threadId || inbound.runId !== gordon.id) return null;
 
   const inboundBlocks = blocks(inbound.blocks);
   if (inboundBlocks.length !== 1) return null;
@@ -75,28 +68,24 @@ export async function issueGordonCommandGrant(
     received.fromBotId !== chiefId ||
     !["request", "question"].includes(String(received.intent ?? "request")) ||
     typeof received.returnToMessageId !== "string"
-  ) return null;
+  )
+    return null;
 
   const outbound = await prisma.message.findUnique({
     where: { id: received.returnToMessageId },
   });
 
-  if (
-    !outbound ||
-    outbound.role !== "bot" ||
-    outbound.botId !== chiefId ||
-    !outbound.runId
-  ) return null;
+  if (!outbound || outbound.role !== "bot" || outbound.botId !== chiefId || !outbound.runId)
+    return null;
 
   const sentBlocks = blocks(outbound.blocks);
   if (
     sentBlocks.length !== 1 ||
     sentBlocks[0]?.kind !== "bot_message_sent" ||
     sentBlocks[0]?.toBotId !== gordonId ||
-    !["request", "question"].includes(
-      String(sentBlocks[0]?.intent ?? "request"),
-    )
-  ) return null;
+    !["request", "question"].includes(String(sentBlocks[0]?.intent ?? "request"))
+  )
+    return null;
 
   const origin = await prisma.run.findUnique({
     where: { id: outbound.runId },
@@ -110,7 +99,8 @@ export async function issueGordonCommandGrant(
     origin.userId !== gordon.userId ||
     origin.spaceId !== gordon.spaceId ||
     !origin.sourceMessageId
-  ) return null;
+  )
+    return null;
 
   const [proof, source] = await Promise.all([
     prisma.charlieOwnerOriginProof.findUnique({
@@ -128,14 +118,16 @@ export async function issueGordonCommandGrant(
     source.threadId !== origin.threadId ||
     proof.userId !== origin.userId ||
     proof.spaceId !== origin.spaceId
-  ) return null;
+  )
+    return null;
 
   const sourceBlocks = blocks(source.blocks);
   if (
     sourceBlocks.length !== 1 ||
     sourceBlocks[0]?.kind !== "text" ||
     typeof sourceBlocks[0]?.text !== "string"
-  ) return null;
+  )
+    return null;
 
   const signingKey = readFileSync(keyPath);
   const proofBytes = Buffer.from(proof.payloadB64, "base64");
@@ -144,11 +136,11 @@ export async function issueGordonCommandGrant(
   if (
     proofSignature.length !== 64 ||
     !verify(null, proofBytes, createPublicKey(signingKey), proofSignature)
-  ) return null;
+  )
+    return null;
 
   const claim: unknown = JSON.parse(proofBytes.toString("utf8"));
-  if (!claim || typeof claim !== "object" || Array.isArray(claim))
-    return null;
+  if (!claim || typeof claim !== "object" || Array.isArray(claim)) return null;
 
   const authority = claim as Record<string, unknown>;
   const now = Math.floor(Date.now() / 1000);
@@ -168,7 +160,8 @@ export async function issueGordonCommandGrant(
     authority.issued_at > now ||
     authority.expires_at <= now ||
     authority.expires_at - authority.issued_at > 3600
-  ) return null;
+  )
+    return null;
 
   const grant = {
     version: 1,

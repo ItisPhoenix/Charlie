@@ -846,9 +846,20 @@ for (const failure of ["load", "save"] as const) {
         await expect.poll(() => monitoringRequests).toBeGreaterThan(connectedRequests);
       // A cookie event on the original session must still refresh that server's identity.
       const beforeCookie = monitoringRequests;
-      await previous.evaluate(() => {
-        document.cookie = `monitoring-test=${Date.now()}; path=/`;
-      });
+      await app.evaluate(
+        async ({ BrowserWindow }, { originalUrl, value }) => {
+          const original = BrowserWindow.getAllWindows().find((window) =>
+            window.webContents.getURL().startsWith(originalUrl),
+          );
+          if (!original) throw new Error("Original app window is missing");
+          await original.webContents.session.cookies.set({
+            name: "monitoring-test",
+            value,
+            url: originalUrl,
+          });
+        },
+        { originalUrl: serverUrl, value: String(Date.now()) },
+      );
       await expect.poll(() => monitoringRequests).toBeGreaterThan(beforeCookie);
     } finally {
       await app?.close();

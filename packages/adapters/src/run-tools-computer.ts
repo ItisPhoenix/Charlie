@@ -312,7 +312,8 @@ export const computerTools: ToolHandlers = {
       const effectId = call.applied?.effect.id;
       if (run.trigger !== "bot_message" || !effectId)
         return call.finish({
-          error: "An authenticated Chief-to-Gordon delegation is required for Ubuntu host commands.",
+          error:
+            "An authenticated Chief-to-Gordon delegation is required for Ubuntu host commands.",
         });
 
       if (args.cwd && args.cwd !== "/")

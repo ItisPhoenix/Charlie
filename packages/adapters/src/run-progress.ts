@@ -5,8 +5,8 @@ import {
   createStreamingRedactor,
   endsSentence,
   isBackgroundRunTrigger,
-  isInternalMissionRunTrigger,
   isConversationalRun,
+  isInternalMissionRunTrigger,
   noteLastToolStep,
   redactSecrets,
   redactSecretsAfter,
@@ -134,7 +134,8 @@ export function nextProgressNonce(ctx: RunContext) {
 }
 
 export function canPublishDurableNarration(ctx: RunContext) {
-  if (ctx.run.trigger === "user" && ctx.bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID) return false;
+  if (ctx.run.trigger === "user" && ctx.bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID)
+    return false;
   return runPromotesMidTurnNarration(ctx.run.trigger) && canPublishDurableProgress(ctx.state.reply);
 }
 
