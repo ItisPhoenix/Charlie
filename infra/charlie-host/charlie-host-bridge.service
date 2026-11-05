@@ -1,0 +1,19 @@
+[Unit]
+Description=Charlie authenticated local host bridge
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=charlie-host
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 -B /opt/charlie-host/bridge.py
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

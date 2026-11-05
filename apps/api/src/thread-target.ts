@@ -730,6 +730,16 @@ export async function sendThreadMessage(
     imageAdmission?: Parameters<typeof assertThreadImageInput>[5];
     maxAttachmentsPerMessage?: number;
     analytics?: ProductAnalytics;
+    attestOwnerOrigin?: (
+      tx: Prisma.TransactionClient,
+      input: {
+        actor: Actor;
+        botId: string;
+        runId: string;
+        sourceMessageId: string;
+        blocks: MessageBlock[];
+      },
+    ) => Promise<void>;
   },
   actor: Actor,
   target: ThreadTarget,
@@ -980,6 +990,13 @@ export async function sendThreadMessage(
           },
         });
         await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
+        await deps.attestOwnerOrigin?.(tx, {
+          actor,
+          botId: target.botId,
+          runId: run.id,
+          sourceMessageId: message.id,
+          blocks,
+        });
         await cancelSupersededQueuedRuns(tx, {
           threadId: target.threadId,
           botIds: [target.botId],

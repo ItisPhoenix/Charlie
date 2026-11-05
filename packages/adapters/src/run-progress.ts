@@ -5,15 +5,21 @@ import {
   createStreamingRedactor,
   endsSentence,
   isBackgroundRunTrigger,
+  isConversationalRun,
+  isInternalMissionRunTrigger,
   noteLastToolStep,
+  redactSecrets,
   redactSecretsAfter,
 } from "@rakazo/core";
 import type { Run } from "@rakazo/db";
 import type { ExecutorDeps } from "./executor-deps.js";
+import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import type { ReplyState, RunContext } from "./run-context.js";
 import { publishMessage } from "./run-messages.js";
-import { runPromotesMidTurnNarration } from "./run-replies.js";
+import { runAllowsSilentEmpty, runPromotesMidTurnNarration } from "./run-replies.js";
+import { PAGE_BROWSER_TOOL_NAMES } from "./run-tool-selection.js";
 import { isExactNoResponse } from "./silent-reply.js";
+import { USER_COMPUTER_SCREEN_TOOLS } from "./user-computer-tools.js";
 import {
   clampUserProgressMessage,
   extractNarrationText,
@@ -45,6 +51,7 @@ export async function createReplyState(
     turnStartedAtMs: run.startedAt?.getTime() ?? Date.now(),
     progressBudgetStart: 0,
     steeringReplyPending: false,
+    computerTaskStarted: false,
     steeringResets: 0,
     lastSteeringResetAt: Number.NEGATIVE_INFINITY,
     workingNotes: [],
@@ -91,6 +98,30 @@ export function canPublishDurableProgress(reply: ReplyState) {
   );
 }
 
+const BROWSER_AND_DESKTOP_TOOLS = new Set([
+  ...IMAGE_RETURNING_COMPUTER_TOOLS,
+  ...PAGE_BROWSER_TOOL_NAMES,
+  ...USER_COMPUTER_SCREEN_TOOLS,
+]);
+
+export function noteComputerTaskStep(reply: ReplyState, toolName: string) {
+  if (BROWSER_AND_DESKTOP_TOOLS.has(toolName)) reply.computerTaskStarted = true;
+}
+
+/**
+ * Browser and desktop tasks often take minutes, so the run's first interim message may tell
+ * the person so at once. Runs nobody is waiting on keep the fresh-turn rule.
+ */
+export function canPostLongTaskHeadsUp(ctx: RunContext) {
+  const { reply } = ctx.state;
+  return (
+    reply.computerTaskStarted &&
+    reply.midTurnProgressCount === 0 &&
+    isConversationalRun(ctx.run.trigger) &&
+    !runAllowsSilentEmpty(ctx.run.trigger)
+  );
+}
+
 export function progressSinceBudgetStart(reply: ReplyState) {
   return reply.midTurnProgressCount - reply.progressBudgetStart;
 }
@@ -103,6 +134,8 @@ export function nextProgressNonce(ctx: RunContext) {
 }
 
 export function canPublishDurableNarration(ctx: RunContext) {
+  if (ctx.run.trigger === "user" && ctx.bot.id === process.env.CHARLIE_OWNER_CHIEF_BOT_ID)
+    return false;
   return runPromotesMidTurnNarration(ctx.run.trigger) && canPublishDurableProgress(ctx.state.reply);
 }
 
@@ -131,7 +164,8 @@ export async function flushProgress(ctx: RunContext) {
     ctx.scripted ||
     !reply.pendingProgress ||
     run.trigger === "routine" ||
-    isBackgroundRunTrigger(run.trigger)
+    isBackgroundRunTrigger(run.trigger) ||
+    isInternalMissionRunTrigger(run.trigger)
   )
     return;
   await deps.events.append({
@@ -200,6 +234,44 @@ export async function publishMidTurnNarration(ctx: RunContext, beforeConnectCard
 }
 
 /**
+ * Text the bot wrote before asking is what the person needs to answer, and a paused run
+ * never reaches the final reply that would bring held notes back. Posts it whole, ahead of
+ * the question.
+ */
+export async function publishNarrationBeforeAsk(ctx: RunContext) {
+  const { deps, run } = ctx;
+  const { reply } = ctx.state;
+  if (!runPromotesMidTurnNarration(run.trigger)) return;
+  const extracted = extractNarrationText(reply.messageSegments, reply.currentTextSegment);
+  const pending = redactSecretsAfter(reply.narrationSoFar, extracted.text, ctx.secrets).trim();
+  reply.narrationSoFar += extracted.text;
+  // Held notes were redacted against the secrets known when they were held; check them again.
+  const text = redactSecrets(
+    [...reply.workingNotes, pending].filter(Boolean).join("\n\n"),
+    ctx.secrets,
+  );
+  if (!text) return;
+  reply.messageSegments = extracted.remaining;
+  reply.currentTextSegment = "";
+  reply.workingNotes.length = 0;
+  reply.narrationStatusShowing = false;
+  reply.assembled = "";
+  reply.hasStreamedText = false;
+  reply.pendingProgress = "";
+  reply.redactor.skip();
+  await publishMessage(
+    deps,
+    run,
+    "bot",
+    [{ kind: "text", text }],
+    undefined,
+    nextProgressNonce(ctx),
+  );
+  reply.midTurnUserTexts.push(text);
+  reply.publishedMidTurnUserMessage = true;
+}
+
+/**
  * Replaces the text streamed so far with the note as the working line. Runs that hold their
  * narration back (routines, peers, background work) keep their live view.
  */
@@ -209,7 +281,8 @@ export async function showNarrationStatus(ctx: RunContext, note: string | undefi
     !note ||
     ctx.scripted ||
     !runPromotesMidTurnNarration(run.trigger) ||
-    isBackgroundRunTrigger(run.trigger)
+    isBackgroundRunTrigger(run.trigger) ||
+    isInternalMissionRunTrigger(run.trigger)
   )
     return;
   ctx.state.reply.narrationStatusShowing = true;

@@ -101,11 +101,6 @@ msgstr "{0} {unitLabel}"
 msgid "{0} connection"
 msgstr "Conexão {0}"
 
-#. placeholder {0}: bot.name
-#: src/pages/ExternalConversationSettings.tsx
-msgid "{0} default"
-msgstr ""
-
 #. placeholder {0}: parts.amount
 #: src/components/ArtifactFileCard.tsx
 msgid "{0} GB"
@@ -150,11 +145,6 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "{0} TB"
 msgstr "{0} TB"
-
-#. placeholder {0}: bot.name
-#: src/pages/ExternalConversationSettings.tsx
-msgid "{0} will still respond to direct mentions."
-msgstr ""
 
 #: src/lib/billing.ts
 msgid "{amount} / {period}"
@@ -962,10 +952,6 @@ msgstr "Auto"
 msgid "Automated senders"
 msgstr ""
 
-#: src/pages/ExternalConversationSettings.tsx
-msgid "Automated senders will appear after they post here."
-msgstr ""
-
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr ""
@@ -1584,6 +1570,7 @@ msgstr "Confirme que a URL está acessível nesta sessão do navegador e teste n
 #: src/pages/MessagingSettingsPanel.tsx
 #: src/pages/model-settings/role-model-picker.tsx
 #: src/pages/PaymentWalletSettingsPanel.tsx
+#: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Conectar"
@@ -2772,10 +2759,6 @@ msgstr "Ativar {0}"
 msgid "Ends {day}"
 msgstr ""
 
-#: src/pages/ExternalConversationSettings.tsx
-msgid "Engage when... Ignore..."
-msgstr ""
-
 #: src/components/GitHubStarPrompt.tsx
 msgid "Enjoying Rakazo?"
 msgstr ""
@@ -2864,6 +2847,10 @@ msgstr "A cada hora"
 #: src/lib/cron.ts
 msgid "Every hour at :{0}"
 msgstr "Toda hora aos {0} minutos"
+
+#: src/pages/ExternalConversationSettings.tsx
+msgid "Every message"
+msgstr "Todas as mensagens"
 
 #: src/lib/cron.ts
 msgid "Every Monday"
@@ -3348,6 +3335,10 @@ msgstr "Instruções {position}"
 msgid "Instructions are too long. Untick some files."
 msgstr "As instruções estão longas demais. Desmarque alguns arquivos."
 
+#: src/pages/ExternalConversationSettings.tsx
+msgid "Instructions for this room"
+msgstr "Instruções para esta sala"
+
 #: src/components/AskCard.tsx
 msgid "Instructions updated"
 msgstr "Instruções atualizadas"
@@ -3482,12 +3473,7 @@ msgstr "Vincular SSO"
 msgid "List view"
 msgstr ""
 
-#: src/pages/ExternalConversationSettings.tsx
-msgid "Listen"
-msgstr ""
-
 #: src/components/call/CallCard.tsx
-#: src/pages/ExternalConversationSettings.tsx
 msgid "Listening"
 msgstr ""
 
@@ -4914,6 +4900,10 @@ msgstr "Substituir chave"
 msgid "Replace value"
 msgstr ""
 
+#: src/pages/ExternalConversationSettings.tsx
+msgid "Replies to"
+msgstr "Responde a"
+
 #: src/pages/shell/message-hover-actions.tsx
 #: src/pages/shell/quote-selection-button.tsx
 msgid "Reply"
@@ -4941,6 +4931,7 @@ msgid "Research & writing"
 msgstr ""
 
 #: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/ExternalConversationSettings.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Reset"
 msgstr "Redefinir"
@@ -5051,10 +5042,6 @@ msgstr ""
 msgid "Revoked"
 msgstr ""
 
-#: src/pages/ExternalConversationSettings.tsx
-msgid "Room guidance"
-msgstr ""
-
 #: src/pages/RoutineEditor.tsx
 msgid "Rotate key"
 msgstr ""
@@ -5120,6 +5107,10 @@ msgstr ""
 #: src/pages/PluginsOverlay.tsx
 msgid "Sales & CRM"
 msgstr ""
+
+#: src/pages/ExternalConversationSettings.tsx
+msgid "Same as {botName}"
+msgstr "Igual a {botName}"
 
 #: src/lib/cron.ts
 msgid "Saturday"
@@ -5451,7 +5442,6 @@ msgstr ""
 #: src/pages/model-settings/connection-controls.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/Welcome.tsx
 msgid "Sign in"
 msgstr "Entrar"
 
@@ -5487,7 +5477,6 @@ msgid "Sign in with the subscription, or test the API key instead."
 msgstr "Entre com a assinatura ou teste a chave de API."
 
 #: src/pages/Auth.tsx
-#: src/pages/Welcome.tsx
 msgid "Sign up"
 msgstr "Cadastre-se"
 
@@ -5652,6 +5641,18 @@ msgstr "Começar a gravar"
 #: src/components/ModelCredits.tsx
 msgid "Start your plan now?"
 msgstr "Começar seu plano agora?"
+
+#: src/pages/RoutineRunHistory.tsx
+msgid "Started {count}d late"
+msgstr "Começou com {count} d de atraso"
+
+#: src/pages/RoutineRunHistory.tsx
+msgid "Started {count}h late"
+msgstr "Começou com {count} h de atraso"
+
+#: src/pages/RoutineRunHistory.tsx
+msgid "Started {count}m late"
+msgstr "Começou com {count} min de atraso"
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -5936,6 +5937,7 @@ msgid "This browser has no on-device dictation. Connect a voice provider with tr
 msgstr ""
 
 #: src/components/call/IncomingCall.tsx
+#: src/lib/user-error.ts
 msgid "This call is no longer ringing."
 msgstr ""
 
@@ -6315,10 +6317,6 @@ msgstr "Usar um modelo encontrado"
 msgid "Use Connect to verify the key."
 msgstr "Use Conectar para verificar a chave."
 
-#: src/pages/ExternalConversationSettings.tsx
-msgid "Use default guidance"
-msgstr ""
-
 #: src/pages/SpaceSettingOverrides.tsx
 msgid "Use defaults"
 msgstr "Usar seus padrões"
@@ -6655,10 +6653,6 @@ msgstr ""
 #: src/components/ModelCredits.tsx
 msgid "Your subscription or API key"
 msgstr ""
-
-#: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "Sua equipe de agentes sempre ativos<0/>, a quem você pode dar trabalho de verdade."
 
 #: src/components/ModelCredits.tsx
 msgid "Your trial ends and your card is charged {price} today."

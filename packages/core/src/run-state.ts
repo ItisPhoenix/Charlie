@@ -32,6 +32,8 @@ const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
   "created",
   "tickets",
   "bot_message",
+  "charlie_mission",
+  "charlie_mission_review",
 ]);
 
 /**
@@ -40,6 +42,15 @@ const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
  * their steps/text. Ticket work reports through board comments and its status.
  * Existing ask and approval cards can still request user input.
  */
+// Mission runs retain complete output in the ledger, unlike generic background runs.
+// Hiding is a presentation decision; do not discard evidence during persistence.
+export const INTERNAL_MISSION_RUN_TRIGGERS = ["charlie_mission", "charlie_mission_review"] as const;
+const INTERNAL_MISSION_RUN_TRIGGER_SET = new Set<string>(INTERNAL_MISSION_RUN_TRIGGERS);
+
+export function isInternalMissionRunTrigger(trigger: string | null | undefined): boolean {
+  return INTERNAL_MISSION_RUN_TRIGGER_SET.has(trigger ?? "");
+}
+
 export const BACKGROUND_RUN_TRIGGERS = ["tickets"] as const;
 const BACKGROUND_RUN_TRIGGER_SET = new Set<string>(BACKGROUND_RUN_TRIGGERS);
 
@@ -89,7 +100,7 @@ export const STEERING_CONTINUATION_PROMPT = "Respond to the user's steering cont
 
 /** Routine runs and the creation intro stay isolated from thread history. */
 export function runReadsThreadHistory(trigger: string | null | undefined): boolean {
-  return trigger !== "created" && trigger !== "routine";
+  return trigger !== "created" && trigger !== "routine" && !isInternalMissionRunTrigger(trigger);
 }
 
 /** Whether a run's turn is part of the thread's conversation and may take user steering. */

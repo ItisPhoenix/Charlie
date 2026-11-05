@@ -21,6 +21,7 @@ import {
   touchGroupUpdatedAt,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { attestAuthenticatedOwnerOrigin } from "../owner-origin.js";
 import type { RouterDeps } from "../router.js";
 import { createRoutineTestRun, routineTestRunNonce, routineTestTarget } from "../routines.js";
 import { withSerializableRetry } from "../serializable-retry.js";
@@ -127,6 +128,7 @@ export function threadsRoutes(ctx: RouterContext) {
       {
         ...deps,
         maxAttachmentsPerMessage: deps.env.maxAttachmentsPerMessage,
+        attestOwnerOrigin: attestAuthenticatedOwnerOrigin,
         imageAdmission: confirmingImages
           ? {
               secrets: deps.secrets,
@@ -516,12 +518,14 @@ export function threadsRoutes(ctx: RouterContext) {
       declineCall: callsEnabled.threads.declineCall.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
         if (target.kind !== "bot") throw new IsolationError();
-        await settleCallRequest(deps, {
+        const declined = await settleCallRequest(deps, {
           threadId: target.threadId,
           callId: input.callId,
           from: ["ringing"],
           status: input.outcome,
         });
+        if (declined?.status !== input.outcome)
+          throw new ORPCError("CONFLICT", { message: "This call is no longer ringing." });
         return { ok: true as const };
       }),
       endCall: callsEnabled.threads.endCall.handler(async ({ context, input }) => {

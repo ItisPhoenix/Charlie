@@ -384,6 +384,7 @@ function toAgentTool(
         return {
           name: String(raw.name ?? "helper"),
           task: String(raw.task ?? ""),
+          tools: Array.isArray(raw.tools) ? raw.tools : [],
           instructions: raw.instructions ? String(raw.instructions) : "",
           model_provider: raw.model_provider ? String(raw.model_provider) : "",
           model_id: raw.model_id ? String(raw.model_id) : "",
@@ -526,7 +527,7 @@ function toAgentTool(
                 };
               }
               if (tool.name === FIND_TOOL) {
-                const found = findTools(deferred, args);
+                const found = findTools(deferred, args, host.request.tools);
                 return {
                   content: [{ type: "text", text: JSON.stringify(found) }],
                   details: found,

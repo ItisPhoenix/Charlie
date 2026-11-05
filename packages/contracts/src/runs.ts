@@ -17,6 +17,8 @@ export const RUN_TRIGGERS = [
   "spawn",
   "skill",
   "bot_message",
+  "charlie_mission",
+  "charlie_mission_review",
   "webhook",
   "messaging",
   "cloud_agent",
@@ -71,6 +73,8 @@ export const RoutineRunSchema = z.object({
   error: z.string().nullable(),
   createdAt: IsoDate,
   startedAt: IsoDate.nullable(),
+  /** When a scheduled run that started well after its time was due; null otherwise. */
+  lateSince: IsoDate.nullable(),
   completedAt: IsoDate.nullable(),
   messageId: Id.nullable(),
 });

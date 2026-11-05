@@ -3,13 +3,36 @@ import {
   FLEET_TOOL_NAMES,
   FLEET_WRITE_TOOL_NAMES,
 } from "@rakazo/contracts";
-import { isBackgroundRunTrigger, isOwnerStartedRun } from "@rakazo/core";
+import {
+  isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
+  isOwnerStartedRun,
+} from "@rakazo/core";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { selectMemoryTools } from "./memory-tools.js";
 import { filterImageReturningComputerTools } from "./model-vision.js";
 import { USER_COMPUTER_SCREEN_TOOLS } from "./run-tools-user-computer.js";
 import { filterBuiltinToolsForRun, filterBuiltinToolsForThread } from "./schedule-tools.js";
+
+// Mission assessments consume untrusted specialist reports. Enforce read-only
+// verification at the offered-tool boundary, not merely by telling the model.
+// No credentials, shell, modifications, delegation, or host authority.
+export const MISSION_REVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "web_search",
+  "web_fetch",
+  "github_source_list",
+  "github_source_find",
+  "github_source_read",
+  "browser_snapshot",
+  "list_files",
+  "read_file",
+  "search_history",
+  "read_history",
+  "recall_memory",
+  "mission_status",
+  "computer_observe",
+]);
 
 export const READ_ONLY_AGENT_TOOLS = new Set([
   "computer_observe",
@@ -21,6 +44,8 @@ export const READ_ONLY_AGENT_TOOLS = new Set([
   "request_takeover",
   "run_subagent",
   "task_catalog",
+  "mission_list",
+  "mission_status",
   "recall_memory",
   "schedule_list",
   "scratchpad_list",
@@ -29,6 +54,9 @@ export const READ_ONLY_AGENT_TOOLS = new Set([
   "skill_read",
   "web_search",
   "web_fetch",
+  "github_source_list",
+  "github_source_find",
+  "github_source_read",
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",
@@ -103,10 +131,20 @@ export function selectBuiltinToolsForRun(options: {
   ).filter(
     (tool) =>
       !disabled.has(tool.name) &&
+      (options.trigger !== "charlie_mission_review" || MISSION_REVIEW_TOOLS.has(tool.name)) &&
       (options.trigger !== "created" || CREATED_RUN_TOOL_NAMES.has(tool.name)) &&
       (!FLEET_TOOL_NAMES_SET.has(tool.name) ||
         (Boolean(options.fleetManagement) && ownerStartedRun)) &&
       (ownerStartedRun || (tool.name !== "update_preferences" && tool.name !== "feedback")) &&
+      (ownerStartedRun ||
+        ![
+          "mission_create",
+          "mission_dispatch",
+          "mission_submit",
+          "mission_reconcile",
+          "mission_request_review",
+          "mission_finalize_review",
+        ].includes(tool.name)) &&
       (options.paymentWalletEnabled || !PURCHASE_TOOL_NAMES.has(tool.name)) &&
       (options.mediaImagesEnabled || tool.name !== "generate_image") &&
       (options.mediaVideoEnabled || tool.name !== "generate_video") &&
@@ -121,6 +159,15 @@ export function selectBuiltinToolsForRun(options: {
           "generate_image",
           "generate_video",
         ].includes(tool.name)) &&
+      (!isInternalMissionRunTrigger(options.trigger) ||
+        !["message_user", "message_bot", "message_agent", "handoff_to_bot", "call_user"].includes(
+          tool.name,
+        )) &&
+      // Specialists execute one assigned work item. They do not coordinate
+      // mission state, so expose mission status only to Chief/owner turns
+      // and assessment runs, not the task-execution subrun itself.
+      (options.trigger !== "charlie_mission" ||
+        (tool.name !== "mission_list" && tool.name !== "mission_status")) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.userComputer || tool.name !== "user_computer_shell") &&
       ((options.userComputer && options.userComputerScreen) ||

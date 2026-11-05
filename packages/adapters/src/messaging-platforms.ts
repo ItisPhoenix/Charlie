@@ -20,6 +20,7 @@ import { ConsoleLogger, convertEmojiPlaceholders, markdownToPlainText } from "ch
 import { createSendblueAdapter } from "chat-adapter-sendblue";
 import type { ClientOptions as SendblueClientOptions } from "sendblue";
 import type { MessagingPlatform } from "./chat-sdk-surface.js";
+import { boundInboundMarkdown } from "./chat-sdk-surface.js";
 import { LazyLarkAdapter } from "./lark/lazy-adapter.js";
 import { Domain } from "./lark/thread-id.js";
 import { LazyPhotonAdapter } from "./photon/lazy-adapter.js";
@@ -239,6 +240,7 @@ export function messagingPlatformsFromEnv(
         timeout: MESSAGING_SEND_TIMEOUT_MS,
       },
     });
+    boundInboundMarkdown(adapter);
     // Slack's reactions.add fails with already_reacted when a replayed inbound reacts twice.
     const addReaction = adapter.addReaction.bind(adapter);
     Object.assign(adapter, {
@@ -688,9 +690,8 @@ function sendblueGroupName(raw: unknown): string | null {
   return typeof name === "string" && name ? name : null;
 }
 
-/** A message on this line that names no known network is treated as plain SMS, the weakest one. */
-function sendblueTransport(raw: unknown): string {
-  const service =
-    typeof raw === "object" && raw !== null ? (raw as { service?: unknown }).service : null;
-  return service === "iMessage" || service === "RCS" ? service : "SMS";
+function sendblueTransport(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const service = (raw as { service?: unknown }).service;
+  return service === "iMessage" || service === "SMS" || service === "RCS" ? service : null;
 }

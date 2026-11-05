@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { ORPCError, onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -39,6 +41,7 @@ import {
   ComposioConnector,
   contentKeyProviderFromEnv,
   createAgentHomeStore,
+  createApnsVoipProvider,
   createArtifactStore,
   createAuditLogReconciler,
   createBackgroundJobHandlers,
@@ -177,9 +180,10 @@ import {
 import { createMessagingReceipts } from "./messaging-receipts.js";
 import { mountMessagingWebhookRoutes } from "./messaging-webhook.js";
 import { monitoringRoutes } from "./monitoring.js";
+import { issueGordonCommandGrant } from "./owner-command.js";
 import { pluginSubmissionRoutes } from "./plugin-submissions.js";
 import { sendReferralEmails, startReferralEmails } from "./referral-email.js";
-import { mountApiRequestBodyLimits } from "./request-body-limit.js";
+import { mountApiRequestBodyLimits, rpcBodyLimit } from "./request-body-limit.js";
 import { createRouter } from "./router.js";
 import { mountScreenTarget } from "./screen-proxy.js";
 import { createAuthResponseAudit } from "./security-audit.js";
@@ -379,6 +383,17 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
         prisma,
       ),
       runs!,
+      async (runId: string) => {
+        const gordonId = process.env.CHARLIE_OWNER_GORDON_BOT_ID;
+        if (!gordonId) return false;
+
+        const target = await prisma.run.findUnique({
+          where: { id: runId },
+          select: { botId: true },
+        });
+
+        return target?.botId === gordonId;
+      },
     );
   const ticketChanges = createTicketChangeNotifier({
     boardEvents,
@@ -521,6 +536,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
       sessionExpiresAt: (sessionId) => pushSessionExpiresAt(prisma, sessionId),
       jobs,
       accessToken: env.expoAccessToken,
+      voip: await createApnsVoipProvider(env.apnsVoip),
     });
   const userDeviceSecret = userDeviceForwardSecret(env.encryptionKey);
   const userDeviceHub = env.userDevicesEnabled
@@ -770,6 +786,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     paymentWallet,
     codexCatalog,
     prisma,
+    notifications,
     pushTokens,
     events,
     ticketChanges,
@@ -909,7 +926,7 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     }),
   );
   app.route("/", marketingEmailRoutes(prisma, env.authSecret));
-  mountApiRequestBodyLimits(app, env.maxUploadSizeBytes);
+  mountApiRequestBodyLimits(app);
   mountScreenTarget(app, prisma, env.screenProxySecret);
   mountDiagramScript(app);
   const auditAuthResponse = createAuthResponseAudit();
@@ -948,6 +965,39 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     return actor && { actor, sessionId: session.session.id };
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
+
+  // Worker-only request for a command-bound owner grant.
+  // No command execution happens inside this API.
+  app.post("/api/internal/charlie/authorize", async (c) => {
+    c.header("cache-control", "no-store");
+
+    const file = process.env.CHARLIE_OWNER_WORKER_KEY_FILE;
+    if (!file) return c.json({ error: "disabled" }, 503);
+
+    const candidate = c.req.header("x-charlie-worker-key") ?? "";
+    if (!candidate || candidate.length > 256) return c.json({ error: "unauthorized" }, 403);
+
+    const key = readFileSync(file, "utf8").trim();
+    const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+
+    if (!timingSafeEqual(digest(candidate), digest(key)))
+      return c.json({ error: "unauthorized" }, 403);
+
+    const body: unknown = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      return c.json({ error: "invalid_request" }, 400);
+
+    try {
+      const grant = await runAsSystem("charlie owner command issuer", () =>
+        issueGordonCommandGrant(prisma, body as Record<string, unknown>),
+      );
+      if (!grant) return c.json({ error: "not_authorized" }, 403);
+      return c.json(grant);
+    } catch {
+      return c.json({ error: "not_authorized" }, 403);
+    }
+  });
+
   if (userDeviceHub && userDevices) {
     mountUserDeviceRoutes(app, {
       prisma,
@@ -976,9 +1026,12 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
       minimums: env.minimumClientBuilds ?? {},
     }),
   );
+  const limitRpcBody = rpcBodyLimit(env.maxUploadSizeBytes);
   app.use("/rpc/*", async (c, next) => {
     const session = await requestSession(c.req.raw);
     const actor = session?.actor ?? null;
+    const tooLarge = await limitRpcBody(c, actor !== null);
+    if (tooLarge) return tooLarge;
     if (actor) {
       enrichLogContext({ "user.id": actor.userId, "space.id": actor.spaceId });
     }

@@ -50,6 +50,27 @@ export async function executeSubagent(
   args: Record<string, unknown>,
 ) {
   if (host.depth > 0) return "Subagents cannot nest further.";
+
+  const requestedTools = args.tools ?? [];
+  if (
+    !Array.isArray(requestedTools) ||
+    requestedTools.length > 12 ||
+    requestedTools.some((name) => typeof name !== "string" || !name.trim() || name.length > 128)
+  ) {
+    return "Subagent refused: invalid tool selection.";
+  }
+
+  const availableTools = new Map(
+    host.request.tools
+      .filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name) && tool.name !== "update_bot")
+      .map((tool) => [tool.name, tool] as const),
+  );
+
+  const unavailable = requestedTools.filter((name) => !availableTools.has(name));
+  if (unavailable.length) {
+    return `Subagent refused unavailable tools: ${unavailable.join(", ")}`;
+  }
+
   await host.subagentGate.acquire();
   const agentId = executionId;
   const name =
@@ -118,7 +139,7 @@ export async function executeSubagent(
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
 
-  const childDefs = host.request.tools.filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name));
+  const childDefs = [...new Set(requestedTools)].map((name) => availableTools.get(name)!);
   const nestedHost: ToolHost = {
     ...host,
     activeModel: {
@@ -389,6 +410,7 @@ export async function executeSubagent(
       name,
       task,
       status: "completed",
+      tools: requestedTools,
       result: clipped,
     });
     // The parent bot reads this as a tool result; say plainly that it is the helper talking.

@@ -172,6 +172,7 @@ describe("tool completion audit", () => {
       }),
     );
     expect(sink.events).toEqual([
+      expect.objectContaining({ message: "agent.tool.completed", "tool.outcome": "error" }),
       expect.objectContaining({
         message: "agent tool completion audit append failed",
         "error.detail": "database unavailable",
@@ -192,7 +193,59 @@ describe("tool completion audit", () => {
     );
 
     expect(append).toHaveBeenCalledOnce();
-    expect(sink.events).toEqual([]);
+    expect(sink.events.map((event) => event.message)).toEqual(["agent.tool.completed"]);
+    installLogger(createLogger({ service: "test", level: "off", sinks: [] }));
+  });
+
+  it("logs each tool completion by name, outcome and duration without its content", async () => {
+    const append = vi.fn().mockResolvedValue(undefined);
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+
+    await appendToolCompletionAudit(
+      { events: { append } },
+      { spaceId: "space-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" },
+      {
+        name: "web_search",
+        executionId: "call-1",
+        durationMs: 12.4,
+        result: {
+          kind: "agent_tool_result",
+          content: [{ type: "text", text: "private search result" }],
+          details: {},
+        },
+      },
+    );
+    await appendToolCompletionAudit(
+      { events: { append } },
+      { spaceId: "space-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" },
+      {
+        name: "mcp__notes__create",
+        executionId: "call-2",
+        durationMs: 3,
+        error: new Error("private failure detail"),
+      },
+    );
+
+    expect(sink.events).toEqual([
+      expect.objectContaining({
+        message: "agent.tool.completed",
+        "run.id": "run-1",
+        "space.id": "space-1",
+        "thread.id": "thread-1",
+        "bot.id": "bot-1",
+        tool: "web_search",
+        "tool.outcome": "succeeded",
+        "tool.duration_ms": 12,
+      }),
+      expect.objectContaining({
+        message: "agent.tool.completed",
+        tool: "mcp__notes__create",
+        "tool.outcome": "error",
+        "tool.duration_ms": 3,
+      }),
+    ]);
+    expect(JSON.stringify(sink.events)).not.toMatch(/private|call-1|call-2/);
     installLogger(createLogger({ service: "test", level: "off", sinks: [] }));
   });
 
@@ -1350,7 +1403,7 @@ describe("userTurnInstructions", () => {
   const archiveBot =
     "archive_bot safely archives another bot in this space. Use it when the user asks to remove that bot or when it is finished and unused. The user can restore it or permanently delete it later. confirm_name must exactly match its name.";
   const replyGuidance =
-    "Send progress updates only when the work will take minutes — long computer tasks or multi-step jobs — never for quick replies and never to announce that you are starting. Even then send at most a few brief updates (a sentence or two each), not one per tool call, and do not narrate routine steps. Thinking stays private. message_user is capped at 500 characters and will be silently cut off if you exceed it \u2014 never put your final answer, a report, or any long-form deliverable in it. Always put the complete final answer in your normal reply, never split across message_user calls, and never assume a message_user update already delivered your content.";
+    "Send progress updates only when the work will take minutes — long computer tasks or multi-step jobs — never for quick replies and never to announce that you are starting. The one exception: once you are working in a browser or on a desktop on a task that will take a few minutes, tell the person right away with message_user that it will take a while. Even then send at most a few brief updates (a sentence or two each), not one per tool call, and do not narrate routine steps. Thinking stays private. message_user is capped at 500 characters and will be silently cut off if you exceed it \u2014 never put your final answer, a report, or any long-form deliverable in it. Always put the complete final answer in your normal reply, never split across message_user calls, and never assume a message_user update already delivered your content.";
   const stableTail = [
     'For charts and data visualization, use the render_plot tool: it renders bar, line, scatter, histogram, heatmap, faceted and many more chart types from a JSON spec and attaches the PNG to the chat. Call render_plot with {"help": true} before your first chart to read the full guide.',
     "When the user asks you to add or connect an MCP server (and gives you its details), use add_mcp_server. When add_mcp_server posts an approval card, end with one short sentence asking the user to approve it. You will be told when they connect it.",

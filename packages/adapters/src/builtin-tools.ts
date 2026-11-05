@@ -768,6 +768,102 @@ export const builtinAgentTools: ConnectorTool[] = [
     readOnly: true,
   },
   {
+    name: "github_source_list",
+    description:
+      "Read-only source directory listing at the deployed revision. Large directories are paginated: use filter or nextOffset to see remaining files. Use github_source_find to locate matching source paths across the entire repository.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: {
+          type: "string",
+          description: "Optional owner/repo; defaults to configured source repository.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; resolves automatically when omitted.",
+        },
+        path: {
+          type: "string",
+          description: "Directory path relative to repository root; omit for root",
+        },
+        filter: { type: "string", description: "Optional filename/path substring filter" },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Page offset returned as nextOffset (default 0).",
+        },
+      },
+      required: [],
+    },
+    readOnly: true,
+  },
+  {
+    name: "github_source_find",
+    description:
+      "Search for source file and directory paths across a public GitHub repository, pinned automatically to the configured revision. Matches filenames/paths, not file content. Use for locating relevant implementation files without a giant directory listing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: {
+          type: "string",
+          description: "Optional owner/repo. Defaults to deployment source.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; defaults to the deployed revision.",
+        },
+        query: {
+          type: "string",
+          description: "Two or more characters describing the filename or path to find.",
+        },
+        directory: {
+          type: "string",
+          description: "Optional repository-relative directory to narrow results.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Pagination offset from a previous result.",
+        },
+      },
+      required: ["query"],
+    },
+    readOnly: true,
+  },
+  {
+    name: "github_source_read",
+    description:
+      "Read a public GitHub file with numbered lines. Repository/revision default to configured source. Exact known file paths can be read directly without listing. The response reports the immutable source revision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: {
+          type: "string",
+          description: "Optional owner/repo; defaults to configured source repository.",
+        },
+        commit: {
+          type: "string",
+          description: "Optional exact revision; resolves automatically when omitted.",
+        },
+        path: { type: "string", description: "File path from github_source_list" },
+        startLine: { type: "integer", minimum: 1, description: "First line to show (default 1)" },
+        lineCount: {
+          type: "integer",
+          minimum: 1,
+          maximum: 200,
+          description: "Lines to show (default 120)",
+        },
+        find: {
+          type: "string",
+          description:
+            "Optional text to locate within a long source file; returns matching line numbers and starts near the first match unless startLine was provided.",
+        },
+      },
+      required: ["path"],
+    },
+    readOnly: true,
+  },
+  {
     name: "web_fetch",
     description:
       "Fetch a public http(s) page and return readable text (title + content). Read-only; no JavaScript. Use after web_search when you need the page itself.",
@@ -1065,6 +1161,139 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "mission_create",
+    description:
+      "Create and dispatch a bounded executive mission from the owner's ordinary goal. Each work item must be an independently completable assignment with its OWN concrete criteria; a specialist must never be responsible for starting, completing or verifying another work item. The durable executive runtime releases dependencies. Select completionPolicy=report for source analysis, explanations, research and other informational deliverables; this records report delivery, not independently verified truth. Select completionPolicy=review when an external action or outcome requires further assessment. Do not add redundant AI reviewers, hidden approvals, or invented dependencies. Persist plan and dispatch once.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", minLength: 1, maxLength: 8000 },
+        maxConcurrentAgents: { type: "integer", minimum: 1, maximum: 8 },
+        maxRuntimeSeconds: { type: "integer", minimum: 60, maximum: 86400 },
+        work: {
+          type: "array",
+          minItems: 1,
+          maxItems: 40,
+          items: {
+            type: "object",
+            properties: {
+              key: { type: "string", description: "Unique lowercase key (3-64 characters)." },
+              title: { type: "string", maxLength: 200 },
+              assigneeBotId: { type: "string" },
+              verifierBotId: {
+                type: "string",
+                description:
+                  "Optional different specialist responsible for independent evidence review.",
+              },
+              dependsOn: { type: "array", items: { type: "string" } },
+              verificationCriteria: {
+                type: "string",
+                maxLength: 2000,
+                description:
+                  "Criteria achievable by THIS assignee alone. Require evidence for the individual deliverable, not running/releasing dependent tasks or completing the whole mission. Do not confuse source inspection with proof of actual runtime behavior.",
+              },
+              completionPolicy: {
+                type: "string",
+                enum: ["report", "review"],
+                description:
+                  "Required for each task. report for read-only informational findings, including researched or source-supported reports. review for modifying/consequential actions or independently assessed outcomes. Delivery is not factual verification.",
+              },
+              maxAttempts: { type: "integer", minimum: 1, maximum: 5 },
+            },
+            required: [
+              "key",
+              "title",
+              "assigneeBotId",
+              "dependsOn",
+              "verificationCriteria",
+              "completionPolicy",
+              "maxAttempts",
+            ],
+          },
+        },
+      },
+      required: ["goal", "maxConcurrentAgents", "maxRuntimeSeconds", "work"],
+    },
+  },
+  {
+    name: "mission_list",
+    description: "List the owner's most recent Charlie missions and their durable progress.",
+    inputSchema: { type: "object", properties: {} },
+    readOnly: true,
+  },
+  {
+    name: "mission_status",
+    description:
+      "Inspect one Charlie mission, dependencies, and real delegated bot run statuses. A completed run is not verified work.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+    readOnly: true,
+  },
+  {
+    name: "mission_dispatch",
+    description:
+      "Activate the persisted Charlie mission. Durable background reconciliation dispatches ready work, retries within budget, and posts one terminal report. Call once after mission_create; do NOT also message_bot or manually poll/reconcile.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+  },
+  {
+    name: "mission_request_review",
+    description:
+      "Send submitted mission work to a different owned specialist for independent review; do not unlock dependents.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+        verifierBotId: { type: "string" },
+      },
+      required: ["missionId", "workKey", "verifierBotId"],
+    },
+  },
+  {
+    name: "mission_finalize_review",
+    description:
+      "Record an evidence verdict only after a different reviewer bot's real completed run and structured report.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+      },
+      required: ["missionId", "workKey"],
+    },
+  },
+  {
+    name: "mission_reconcile",
+    description:
+      "Reconcile persisted mission state from real delegated run status. Requeues failed work only when the attempt and deadline budgets permit, without claiming verification.",
+    inputSchema: {
+      type: "object",
+      properties: { missionId: { type: "string" } },
+      required: ["missionId"],
+    },
+  },
+  {
+    name: "mission_submit",
+    description:
+      "Record evidence from a completed delegated bot run as submitted, NOT independently verified. Dependent work remains locked.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        missionId: { type: "string" },
+        workKey: { type: "string" },
+        evidence: { type: "string", minLength: 1, maxLength: 4000 },
+      },
+      required: ["missionId", "workKey", "evidence"],
+    },
+  },
+  {
     name: "task_catalog",
     description:
       "Read-only inventory and source of truth for this bot's real open tasks, saved routines, taught skills, reusable skills, and currently exposed tools. Call it before claiming a task or skill exists. Use the returned ids and exact names; do not infer capabilities from memory or conversation text.",
@@ -1231,7 +1460,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "schedule_create",
     description:
-      'Create a reminder or recurring job for this bot. Use for "remind me in 10 minutes" or "every morning send a joke". Repeats: cron or every/unit (min 1 minute), optionally from startAt. One-shot: runAt, delayMinutes, or delaySeconds. A repeating job carries out the user\'s lasting request each time, not a copy of what was decided today.',
+      "Create a reminder (runAt/delayMinutes/delaySeconds) or recurring job (cron or every/unit, minimum 1 minute, optional startAt). Repeats execute the original request each time.",
     inputSchema: scheduleCreateInputSchema,
   },
   {
@@ -1314,7 +1543,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "skill_read",
     description:
-      "Load a Claude Agent Skill (SKILL.md recipe) by exact name. Call this when a catalog skill matches the user's request, then follow it immediately. When the result lists files, read one by calling again with its path in file.",
+      "Read a named SKILL.md skill. Call again with file to read linked references, then follow the skill instructions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1382,7 +1611,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a temporary helper inside this turn; it has no saved bot, chat or computer. If the user wants a persistent bot, use spawn_bot instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1391,6 +1620,13 @@ export const builtinAgentTools: ConnectorTool[] = [
           description: "Short label shown in the thread, e.g. scout or reviewer.",
         },
         task: { type: "string", description: "The work the helper should complete." },
+        tools: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 12,
+          description:
+            "Exact tools this helper needs from your available tools. Omit for a tool-free helper. Never grant unnecessary tools.",
+        },
         instructions: {
           type: "string",
           description: "Optional extra system instructions for the helper.",
@@ -1461,7 +1697,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "update_bot",
     description:
-      "Read or change your own settings. Call with no fields to read them and the models and thinking levels you can pick. Pass fields to change them, only when the user asks; setting your name, description and first instructions when you have none is fine. Never claim a change without calling this.",
+      "Read your bot settings with no fields, including available models and thinking levels. Change settings only when the user requests, except initial setup. Never claim changes without calling this.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1650,7 +1886,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "message_bot",
     description:
-      'Send a useful update, question, or result to another of the user\'s bots. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. "[to Comms] ...") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.',
+      "Send a useful update, question, or result to another of the user's bots. NOT for Chief's owner-originated missions: use mission_create + mission_dispatch instead. You must call this tool to actually deliver it — writing the message in your own reply text (e.g. \"[to Comms] ...\") does not send anything and the recipient never sees it. Delivery is async and does not end your turn. Continue independent work; do not poll or send ack-only messages. Later updates only if they add something new.",
     inputSchema: {
       type: "object",
       properties: {

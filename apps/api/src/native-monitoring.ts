@@ -186,5 +186,5 @@ export async function sanitizeNativeEnvelope(
     output.push(JSON.stringify({ type: "event", length: encoder.encode(event).length }), event);
   }
   if (!events) throw new Error("No error events");
-  return encoder.encode(output.join("\n") + "\n");
+  return encoder.encode(`${output.join("\n")}\n`);
 }

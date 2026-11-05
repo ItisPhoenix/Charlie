@@ -3,8 +3,10 @@ import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
+  INTERNAL_MISSION_RUN_TRIGGERS,
   isBackgroundInputBlock,
   isBackgroundRunTrigger,
+  isInternalMissionRunTrigger,
   isPeerReceiptBlocks,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
@@ -124,12 +126,18 @@ async function withoutPeerRunMessages<
   const runs = await prisma.run.findMany({
     where: {
       id: { in: runIds },
-      trigger: { in: ["bot_message", ...BACKGROUND_RUN_TRIGGERS] },
+      trigger: {
+        in: ["bot_message", ...BACKGROUND_RUN_TRIGGERS, ...INTERNAL_MISSION_RUN_TRIGGERS],
+      },
     },
     select: { id: true, trigger: true },
   });
   const backgroundRunIds = new Set(
-    runs.filter((run) => isBackgroundRunTrigger(run.trigger)).map((r) => r.id),
+    runs
+      .filter(
+        (run) => isBackgroundRunTrigger(run.trigger) || isInternalMissionRunTrigger(run.trigger),
+      )
+      .map((r) => r.id),
   );
   const peerRunIds = new Set(
     runs.filter((run) => !backgroundRunIds.has(run.id)).map((run) => run.id),
@@ -182,7 +190,9 @@ export async function isBackgroundRun(
   if (!backgroundRun) {
     backgroundRun = prisma.run
       .findUnique({ where: { id: runId }, select: { trigger: true } })
-      .then((run) => isBackgroundRunTrigger(run?.trigger));
+      .then(
+        (run) => isBackgroundRunTrigger(run?.trigger) || isInternalMissionRunTrigger(run?.trigger),
+      );
     cache.set(runId, backgroundRun);
   }
   return backgroundRun;

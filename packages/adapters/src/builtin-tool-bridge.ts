@@ -61,6 +61,7 @@ const AREAS: Array<[area: string, matches: (name: string) => boolean]> = [
     (name) =>
       /^(scratchpad_|ticket_)/.test(name) || ["board_tickets", "task_catalog"].includes(name),
   ],
+  ["missions", (name) => name.startsWith("mission_")],
   ["skills", (name) => name.startsWith("skill_")],
   ["schedules", (name) => name.startsWith("schedule_")],
   ["memory", (name) => name.includes("memory")],
@@ -130,7 +131,11 @@ function bridgeTools(deferred: readonly ConnectorTool[]): ConnectorTool[] {
 }
 
 /** Full definitions of the deferred tools named, or the best matches for a query. */
-export function findTools(deferred: readonly ConnectorTool[], args: Record<string, unknown>) {
+export function findTools(
+  deferred: readonly ConnectorTool[],
+  args: Record<string, unknown>,
+  offered: readonly ConnectorTool[] = [],
+) {
   const names = Array.isArray(args.names) ? args.names.map(String) : [];
   const query = String(args.query ?? "")
     .trim()
@@ -142,10 +147,27 @@ export function findTools(deferred: readonly ConnectorTool[], args: Record<strin
           (entry) => deferred.find((tool) => tool.name === entry.id)!,
         )
       : [];
-  const unknown = names.filter((name) => !found.some((tool) => tool.name === name));
+  const directlyOffered = offered.filter((tool) => !isDeferredTool(tool.name));
+  const directlyAvailable = names.length
+    ? directlyOffered.filter((tool) => names.includes(tool.name)).map((tool) => tool.name)
+    : query
+      ? rankCatalogEntries(searchEntries(directlyOffered), query, FIND_TOOL_LIMIT).hits.map(
+          (entry) => entry.tool.name,
+        )
+      : [];
+  const unknown = names.filter(
+    (name) => !found.some((tool) => tool.name === name) && !directlyAvailable.includes(name),
+  );
   return {
     tools: found.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+    ...(directlyAvailable.length ? { directlyAvailable } : {}),
     ...(unknown.length ? { unknown } : {}),
-    ...(found.length ? {} : { hint: "Pass names from this tool's list or other words." }),
+    ...(directlyAvailable.length
+      ? {
+          hint: "Tools in directlyAvailable are already offered to you. Call them directly, not through use_tool.",
+        }
+      : found.length
+        ? {}
+        : { hint: "Pass names from this tool's list or other words." }),
   };
 }
