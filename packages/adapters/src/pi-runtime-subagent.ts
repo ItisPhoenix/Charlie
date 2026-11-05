@@ -62,7 +62,7 @@ export async function executeSubagent(
 
   const availableTools = new Map(
     host.request.tools
-      .filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name))
+      .filter((tool) => !DELEGATION_TOOL_NAMES.has(tool.name) && tool.name !== "update_bot")
       .map((tool) => [tool.name, tool] as const),
   );
 
@@ -410,6 +410,7 @@ export async function executeSubagent(
       name,
       task,
       status: "completed",
+      tools: requestedTools,
       result: clipped,
     });
     // The parent bot reads this as a tool result; say plainly that it is the helper talking.
