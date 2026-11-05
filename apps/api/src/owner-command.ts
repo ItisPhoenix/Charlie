@@ -52,7 +52,7 @@ export async function issueGordonCommandGrant(
   if (
     !gordon ||
     gordon.botId !== gordonId ||
-    gordon.trigger !== "bot_message" ||
+    !["user", "bot_message"].includes(gordon.trigger) ||
     gordon.status !== "running" ||
     !gordon.sourceMessageId
   ) return null;
@@ -66,47 +66,53 @@ export async function issueGordonCommandGrant(
     inbound.runId !== gordon.id
   ) return null;
 
-  const inboundBlocks = blocks(inbound.blocks);
-  if (inboundBlocks.length !== 1) return null;
-  const received = inboundBlocks[0];
+  // A direct owner request to Gordon has its own signed owner-origin proof.
+  // Delegation through Chief must link to the exact original owner run.
+  let originRunId: string;
+  if (gordon.trigger === "user") {
+    if (inbound.role !== "user") return null;
+    originRunId = gordon.id;
+  } else {
+    const inboundBlocks = blocks(inbound.blocks);
+    if (inboundBlocks.length !== 1) return null;
+    const received = inboundBlocks[0];
 
-  if (
-    received?.kind !== "bot_message_received" ||
-    received.fromBotId !== chiefId ||
-    !["request", "question"].includes(String(received.intent ?? "request")) ||
-    typeof received.returnToMessageId !== "string"
-  ) return null;
+    if (
+      received?.kind !== "bot_message_received" ||
+      received.fromBotId !== chiefId ||
+      !["request", "question"].includes(String(received.intent ?? "request")) ||
+      typeof received.returnToMessageId !== "string"
+    ) return null;
 
-  const outbound = await prisma.message.findUnique({
-    where: { id: received.returnToMessageId },
-  });
+    const outbound = await prisma.message.findUnique({
+      where: { id: received.returnToMessageId },
+    });
+    if (
+      !outbound ||
+      outbound.role !== "bot" ||
+      outbound.botId !== chiefId ||
+      !outbound.runId
+    ) return null;
 
-  if (
-    !outbound ||
-    outbound.role !== "bot" ||
-    outbound.botId !== chiefId ||
-    !outbound.runId
-  ) return null;
-
-  const sentBlocks = blocks(outbound.blocks);
-  if (
-    sentBlocks.length !== 1 ||
-    sentBlocks[0]?.kind !== "bot_message_sent" ||
-    sentBlocks[0]?.toBotId !== gordonId ||
-    !["request", "question"].includes(
-      String(sentBlocks[0]?.intent ?? "request"),
-    )
-  ) return null;
+    const sentBlocks = blocks(outbound.blocks);
+    if (
+      sentBlocks.length !== 1 ||
+      sentBlocks[0]?.kind !== "bot_message_sent" ||
+      sentBlocks[0]?.toBotId !== gordonId ||
+      !["request", "question"].includes(
+        String(sentBlocks[0]?.intent ?? "request"),
+      )
+    ) return null;
+    originRunId = outbound.runId;
+  }
 
   const origin = await prisma.run.findUnique({
-    where: { id: outbound.runId },
+    where: { id: originRunId },
   });
-
   if (
     !origin ||
-    origin.botId !== chiefId ||
+    origin.botId !== (gordon.trigger === "user" ? gordonId : chiefId) ||
     origin.trigger !== "user" ||
-    origin.threadId !== outbound.threadId ||
     origin.userId !== gordon.userId ||
     origin.spaceId !== gordon.spaceId ||
     !origin.sourceMessageId
@@ -159,7 +165,7 @@ export async function issueGordonCommandGrant(
     authority.issuer !== "charlie-api" ||
     authority.owner_user_id !== origin.userId ||
     authority.space_id !== origin.spaceId ||
-    authority.chief_bot_id !== chiefId ||
+    authority.chief_bot_id !== origin.botId ||
     authority.origin_run_id !== origin.id ||
     authority.source_message_id !== source.id ||
     authority.prompt_sha256 !== sha256(sourceBlocks[0].text) ||
