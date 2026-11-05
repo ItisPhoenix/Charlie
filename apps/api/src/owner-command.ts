@@ -69,9 +69,11 @@ export async function issueGordonCommandGrant(
   // A direct owner request to Gordon has its own signed owner-origin proof.
   // Delegation through Chief must link to the exact original owner run.
   let originRunId: string;
+  let expectedOriginThreadId: string;
   if (gordon.trigger === "user") {
     if (inbound.role !== "user") return null;
     originRunId = gordon.id;
+    expectedOriginThreadId = gordon.threadId;
   } else {
     const inboundBlocks = blocks(inbound.blocks);
     if (inboundBlocks.length !== 1) return null;
@@ -104,6 +106,7 @@ export async function issueGordonCommandGrant(
       )
     ) return null;
     originRunId = outbound.runId;
+    expectedOriginThreadId = outbound.threadId;
   }
 
   const origin = await prisma.run.findUnique({
@@ -113,6 +116,7 @@ export async function issueGordonCommandGrant(
     !origin ||
     origin.botId !== (gordon.trigger === "user" ? gordonId : chiefId) ||
     origin.trigger !== "user" ||
+    origin.threadId !== expectedOriginThreadId ||
     origin.userId !== gordon.userId ||
     origin.spaceId !== gordon.spaceId ||
     !origin.sourceMessageId
