@@ -310,9 +310,9 @@ export const computerTools: ToolHandlers = {
       bot.id === process.env.CHARLIE_OWNER_GORDON_BOT_ID
     ) {
       const effectId = call.applied?.effect.id;
-      if (run.trigger !== "bot_message" || !effectId)
+      if (!["user", "bot_message"].includes(run.trigger) || !effectId)
         return call.finish({
-          error: "An authenticated Chief-to-Gordon delegation is required for Ubuntu host commands.",
+          error: "A verified owner request (direct or delegated) is required for Ubuntu host commands.",
         });
 
       if (args.cwd && args.cwd !== "/")
