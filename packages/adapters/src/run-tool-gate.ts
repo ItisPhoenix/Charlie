@@ -318,7 +318,7 @@ export async function gateToolCall(
   // and by the host's signed-grant verifier and durable effect ledger.
   const gordonOwnerHost =
     name === "shell" &&
-    run.trigger === "bot_message" &&
+    (run.trigger === "user" || run.trigger === "bot_message") &&
     ctx.bot.id === process.env.CHARLIE_OWNER_GORDON_BOT_ID &&
     Boolean(process.env.CHARLIE_GORDON_HOST_SOCKET);
 
